@@ -1,0 +1,37 @@
+# ── PlatformIO ─────────────────────────────────────
+.pio/
+.pioenvs/
+.piolibdeps/
+
+# ── Arduino IDE ────────────────────────────────────
+*.bak
+
+# ── Python companion ───────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+companion/.venv/
+companion/.env
+
+# ── Firmware binaries (built artifacts) ────────────
+# Uncomment to commit pre-built binaries with the repo.
+flasher/firmware.bin
+release/*.bin
+release/manifest.json
+!release/README.md
+
+# ── Editor / OS ────────────────────────────────────
+.DS_Store
+Thumbs.db
+.vscode/
+*.swp
+*.swo
+*~
+
+# ── Secrets ────────────────────────────────────────
+*.env
+secrets.h
+credentials.h
