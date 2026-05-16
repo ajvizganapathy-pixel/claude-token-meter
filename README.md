@@ -2,6 +2,9 @@
 
 Real-time Claude API token usage monitor — XIAO ESP32-S3 desk display with OLED, audio alerts, OTA updates, and a one-click browser web flasher.
 
+> **🌐 Live Web Flasher:** https://ajvizganapathy-pixel.github.io/claude-token-meter/
+> Open in Chrome or Edge to flash your XIAO ESP32-S3 directly from the browser — no drivers, no CLI.
+
 ![License](https://img.shields.io/badge/license-MIT-purple)
 ![Platform](https://img.shields.io/badge/board-XIAO_ESP32--S3-blue)
 ![Framework](https://img.shields.io/badge/framework-Arduino-teal)
