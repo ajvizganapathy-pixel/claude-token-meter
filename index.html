@@ -947,32 +947,52 @@ async function downloadFromGitHub() {
     if (!latestRelease) { log('Could not reach GitHub API', 'error'); return; }
   }
 
-  const asset = (latestRelease.assets || []).find(a => a.name === 'firmware.bin');
+  // Prefer exact match; fall back to any .bin in the release
+  const asset = (latestRelease.assets || []).find(a => a.name === 'firmware.bin')
+             || (latestRelease.assets || []).find(a => a.name.endsWith('.bin'));
   if (!asset) {
-    log('No firmware.bin found in latest release', 'error');
+    log('No .bin asset found in latest release', 'error');
+    log('Assets available: ' + (latestRelease.assets || []).map(a => a.name).join(', '), 'warn');
     return;
   }
 
   const $btn = document.getElementById('btn-gh-download');
   $btn.disabled = true;
-  log(`Downloading firmware.bin (${(asset.size/1024).toFixed(0)} KB) from ${latestRelease.tag_name}...`, 'info');
+  log(`Asset: ${asset.name}  (${(asset.size/1024).toFixed(0)} KB)  tag: ${latestRelease.tag_name}`, 'info');
+
+  // Use the GitHub API asset URL with Accept: application/octet-stream.
+  // This endpoint supports CORS for public repos, unlike browser_download_url
+  // which points to github.com and has no Access-Control-Allow-Origin header.
+  const apiAssetUrl = asset.url;  // e.g. https://api.github.com/repos/.../releases/assets/{id}
+  log(`Fetching via API: ${apiAssetUrl}`, 'info');
 
   try {
-    const resp = await fetch(asset.browser_download_url);
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const resp = await fetch(apiAssetUrl, {
+      headers: { 'Accept': 'application/octet-stream' }
+    });
+    log(`Response status: ${resp.status} ${resp.statusText}`, resp.ok ? 'info' : 'error');
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+
     const buf = await resp.arrayBuffer();
     const u8  = new Uint8Array(buf);
+
+    if (u8.length === 0) throw new Error('Downloaded file is empty');
+    if (asset.size && Math.abs(u8.length - asset.size) > 1024) {
+      log(`Size mismatch: expected ${asset.size} B, got ${u8.length} B`, 'warn');
+    }
+
     firmwareData = u8.reduce((acc, b) => acc + String.fromCharCode(b), '');
     firmwareSize = u8.length;
 
-    $fwName.textContent = `✅  firmware.bin  (${(firmwareSize/1024).toFixed(1)} KB)  [${latestRelease.tag_name}]`;
+    $fwName.textContent = `✅  ${asset.name}  (${(firmwareSize/1024).toFixed(1)} KB)  [${latestRelease.tag_name}]`;
     $fwName.style.color = 'var(--green)';
     log(`Firmware downloaded: ${(firmwareSize/1024).toFixed(1)} KB`, 'ok');
     if (espLoader) $btnFlash.disabled = false;
     else log('Firmware ready. Click Connect to flash.', 'info');
   } catch (err) {
     log(`Download failed: ${err.message}`, 'error');
-    log('Try downloading manually from: https://github.com/' + GITHUB_REPO + '/releases', 'warn');
+    log('Direct link: ' + asset.browser_download_url, 'warn');
+    log('Or visit: https://github.com/' + GITHUB_REPO + '/releases', 'warn');
   } finally {
     $btn.disabled = false;
   }
