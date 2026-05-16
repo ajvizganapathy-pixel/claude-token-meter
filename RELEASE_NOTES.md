@@ -1,43 +1,34 @@
-# Release Notes — v1.1.0
+﻿## Claude Token Meter v1.1.0
 
-**Release date:** 2026-05-16
-**Target board:** Seeed XIAO ESP32-S3
+First production firmware release for the Seeed XIAO ESP32-S3 + SSD1306 OLED + MAX98357 I2S amplifier.
 
-## Highlights
+### Hardware
+- MCU: Seeed XIAO ESP32-S3
+- Display: SSD1306 0.96 inch OLED (I2C)
+- Audio: MAX98357 I2S 3W Amplifier
 
-- First production release of **Claude Token Meter** — a real-time OLED desk display for Claude API token usage.
-- Browser-based **Web Flasher** (Chrome/Edge, WebSerial) — no drivers, no CLI.
-- **ArduinoOTA** wireless firmware updates over WiFi.
-- **WiFiManager** captive-portal first-boot setup at SSID `ClaudeTokenMeter`.
-- **mDNS** hostname `claude-meter.local` and built-in web dashboard.
-- **REST API** (`/api/status`, `/api/update`, `/api/config`) with absolute and increment modes.
-- **MAX98357 I2S audio alerts** at 80 / 90 / 100 % of the weekly token limit.
-- **NVS-persistent stats**, NTP-synced daily and weekly resets.
-- **GitHub Actions CI** builds firmware and attaches the `.bin` to tagged releases.
+### Features
+- 4-page rotating OLED dashboard (weekly usage, token breakdown, daily/session stats, system info)
+- Audio alerts at 80%, 90%, 100% of weekly token limit
+- Open WiFi AP + captive portal for first-boot WiFi setup
+- mDNS: http://claude-meter.local
+- REST API for companion Python script
+- Persistent stats (NVS flash)
+- OTA firmware updates (ArduinoOTA)
+- Auto daily + weekly reset (NTP-synced)
+- Factory reset via BOOT button hold (5s)
 
-## Included artifacts (after CI build)
+### Flash via Web Flasher
+1. Open https://ajvizganapathy-pixel.github.io/claude-token-meter/ in Chrome or Edge
+2. Put XIAO in bootloader mode: hold BOOT, press RESET, release BOOT
+3. Download firmware.bin from this release assets below
+4. Click Connect then Flash Firmware in the web flasher
 
-| File | Purpose |
-|---|---|
-| `firmware.bin` | Merged image — flash at offset `0x0` via the Web Flasher |
-| `bootloader.bin` | Optional — separate bootloader for low-level flashing (offset `0x0`) |
-| `partitions.bin` | Optional — partition table (offset `0x8000`) |
-| `manifest.json` | esp-web-tools manifest (optional alternative flasher) |
+Requires Chrome/Edge 89+ with Web Serial API.
 
-> The Web Flasher in `flasher/index.html` uses **esptool-js** and only needs the merged `firmware.bin`.
-
-## Known limitations
-
-- Web Flasher requires a Chromium-based browser with WebSerial (Chrome ≥ 89, Edge ≥ 89). Firefox / Safari are not supported.
-- OTA password is hard-coded to `ctmeter2024` — **change it before deploying to production**.
-- The captive-portal AP is open (unsecured) during first-boot WiFi setup.
-
-## Upgrade
-
-OTA from any prior 1.x build:
-
-```
-pio run -t upload -e xiao_esp32s3 --upload-port claude-meter.local
-```
-
-Or open `flasher/index.html` and flash over USB in bootloader mode.
+### Build fixes applied for Arduino ESP32 3.x compatibility
+- Fixed I2S driver API usage (removed deprecated communication_format field)
+- Fixed numeric literal digit separator for C++11 compatibility
+- Fixed Serial.printf with F() macro
+- Removed deprecated MDNS.update() call
+- Converted embedded JS to arrow functions for INO-to-CPP compiler compatibility

@@ -205,6 +205,33 @@ header p {
   min-height: 18px;
 }
 
+/* ── GitHub release button ──────────────────── */
+.btn-gh {
+  background: linear-gradient(135deg, #0d1117, #161b22);
+  color: var(--purple2);
+  border: 1px solid rgba(124,58,237,.35);
+  box-shadow: 0 4px 16px rgba(124,58,237,.1);
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+.btn-gh:hover:not(:disabled) {
+  background: linear-gradient(135deg, #161b22, #21262d);
+  border-color: rgba(124,58,237,.6);
+  box-shadow: 0 4px 24px rgba(124,58,237,.25);
+  transform: translateY(-1px);
+}
+.release-tag {
+  display: inline-block;
+  font-family: var(--mono);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  background: rgba(124,58,237,.15);
+  border: 1px solid rgba(124,58,237,.3);
+  color: var(--purple3);
+  margin-left: 6px;
+}
+
 /* ── Baud select ────────────────────────────── */
 .baud-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
 .baud-btn {
@@ -500,6 +527,14 @@ footer a:hover { color: var(--purple2); }
   <!-- ╔══════════ FIRMWARE ══════════╗ -->
   <div class="card">
     <div class="card-title">Firmware File</div>
+
+    <!-- GitHub Release download -->
+    <button class="btn btn-gh" id="btn-gh-download" onclick="downloadFromGitHub()">
+      <span>⬇</span> Download Latest Firmware from GitHub
+      <span class="release-tag" id="release-tag">checking...</span>
+    </button>
+
+    <div class="fw-label" style="margin-top:4px;margin-bottom:4px;text-align:center;font-size:11px">— or select a local file —</div>
     <div class="fw-label">Select firmware.bin</div>
     <div class="fw-row">
       <input type="file" id="fw-file" class="fw-input" accept=".bin">
@@ -644,7 +679,8 @@ footer a:hover { color: var(--purple2); }
 
 <footer>
   Claude Token Meter &nbsp;•&nbsp; XIAO ESP32-S3 &nbsp;•&nbsp;
-  <a href="https://github.com" target="_blank">GitHub</a> &nbsp;•&nbsp;
+  <a href="https://github.com/ajvizganapathy-pixel/claude-token-meter" target="_blank">GitHub</a> &nbsp;•&nbsp;
+  <a href="https://github.com/ajvizganapathy-pixel/claude-token-meter/releases" target="_blank">Releases</a> &nbsp;•&nbsp;
   Uses <a href="https://github.com/espressif/esptool-js" target="_blank">esptool-js</a>
 </footer>
 
@@ -885,6 +921,63 @@ async function handleFlash() {
   $btnConnect.disabled = false;
 }
 
+// ── GitHub Releases ───────────────────────────────────────
+const GITHUB_REPO = 'ajvizganapathy-pixel/claude-token-meter';
+let latestRelease  = null;
+
+async function fetchLatestRelease() {
+  const $tag = document.getElementById('release-tag');
+  try {
+    const res  = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
+    if (!res.ok) throw new Error(`GitHub API ${res.status}`);
+    latestRelease = await res.json();
+    const tag = latestRelease.tag_name || 'unknown';
+    $tag.textContent = tag;
+    log(`Latest release: ${tag}`, 'ok');
+  } catch (err) {
+    $tag.textContent = 'offline';
+    log(`GitHub check failed: ${err.message}`, 'warn');
+  }
+}
+
+async function downloadFromGitHub() {
+  if (!latestRelease) {
+    log('Fetching release info...', 'info');
+    await fetchLatestRelease();
+    if (!latestRelease) { log('Could not reach GitHub API', 'error'); return; }
+  }
+
+  const asset = (latestRelease.assets || []).find(a => a.name === 'firmware.bin');
+  if (!asset) {
+    log('No firmware.bin found in latest release', 'error');
+    return;
+  }
+
+  const $btn = document.getElementById('btn-gh-download');
+  $btn.disabled = true;
+  log(`Downloading firmware.bin (${(asset.size/1024).toFixed(0)} KB) from ${latestRelease.tag_name}...`, 'info');
+
+  try {
+    const resp = await fetch(asset.browser_download_url);
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const buf = await resp.arrayBuffer();
+    const u8  = new Uint8Array(buf);
+    firmwareData = u8.reduce((acc, b) => acc + String.fromCharCode(b), '');
+    firmwareSize = u8.length;
+
+    $fwName.textContent = `✅  firmware.bin  (${(firmwareSize/1024).toFixed(1)} KB)  [${latestRelease.tag_name}]`;
+    $fwName.style.color = 'var(--green)';
+    log(`Firmware downloaded: ${(firmwareSize/1024).toFixed(1)} KB`, 'ok');
+    if (espLoader) $btnFlash.disabled = false;
+    else log('Firmware ready. Click Connect to flash.', 'info');
+  } catch (err) {
+    log(`Download failed: ${err.message}`, 'error');
+    log('Try downloading manually from: https://github.com/' + GITHUB_REPO + '/releases', 'warn');
+  } finally {
+    $btn.disabled = false;
+  }
+}
+
 // ── Init ──────────────────────────────────────────────────
 window.addEventListener('load', () => {
   if (!('serial' in navigator)) {
@@ -894,8 +987,9 @@ window.addEventListener('load', () => {
     log('Please use Google Chrome or Microsoft Edge version 89 or newer.', 'warn');
   } else {
     log('Web Serial API detected ✅', 'ok');
-    log('Select firmware.bin, then click Connect.', 'info');
+    log('Select firmware.bin or download from GitHub, then click Connect.', 'info');
   }
+  fetchLatestRelease();
 });
 </script>
 </body>

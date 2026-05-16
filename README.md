@@ -89,21 +89,26 @@ Copy it to `flasher/firmware.bin`.
 
 ### 2 — Flash with the Web Flasher
 
-The Web Flasher (`flasher/index.html`) is a self-contained page powered by
-[esptool-js](https://github.com/espressif/esptool-js). It works in any
-Chromium-based browser with WebSerial (Chrome ≥ 89, Edge ≥ 89, Opera, Brave).
+The Web Flasher is powered by [esptool-js](https://github.com/espressif/esptool-js).
+It works in any Chromium-based browser with WebSerial (Chrome ≥ 89, Edge ≥ 89, Opera, Brave).
 No drivers, no CLI, no Python.
 
-1. Plug the XIAO ESP32-S3 into USB.
-2. Put XIAO in **bootloader mode**: hold **BOOT** → press **RESET** → release **BOOT**.
-3. Open `flasher/index.html` locally **or** the GitHub Pages URL (see below).
-4. Click **Connect** → pick the serial port.
-5. Select your `firmware.bin` (download from the GitHub Releases page).
+**Easiest path — GitHub Releases (recommended):**
+
+1. Open **https://ajvizganapathy-pixel.github.io/claude-token-meter/** in Chrome or Edge.
+2. Plug the XIAO ESP32-S3 into USB.
+3. Put XIAO in **bootloader mode**: hold **BOOT** → press **RESET** → release **BOOT**.
+4. Click **Download Latest Firmware from GitHub** — it auto-fetches the latest release.
+5. Click **Connect** → pick the serial port.
 6. Click **Flash Firmware**. Wait ~30 s.
-7. Press **RESET** once when flashing completes.
+
+**Manual path — local file:**
+
+1. Download `firmware.bin` from the [Releases page](https://github.com/ajvizganapathy-pixel/claude-token-meter/releases).
+2. Follow steps 1–4 above but select the downloaded file instead of using the GitHub button.
 
 > **Browser support**: Firefox and Safari do not implement WebSerial and are
-> not supported. Use Chrome or Edge.
+> not supported. Use Chrome or Edge 89+.
 
 ### 3 — Configure WiFi
 
@@ -255,7 +260,7 @@ Stats are preserved. To clear stats too: `POST /api/config` `{"resetStats": true
 ## Project Structure
 
 ```
-ClaudeTokenMeter/
+claude-token-meter/
 ├── firmware/
 │   └── ClaudeTokenMeter/
 │       └── ClaudeTokenMeter.ino   ← Main firmware (v1.1.0)
@@ -265,15 +270,18 @@ ClaudeTokenMeter/
 │   ├── setup.sh                   ← Linux/macOS one-click setup
 │   └── setup.bat                  ← Windows one-click setup
 ├── flasher/
-│   ├── index.html                 ← Web flasher (open in Chrome)
-│   └── firmware.bin               ← Auto-copied here after build
+│   └── index.html                 ← Web flasher (GitHub Pages mirror)
+├── release/
+│   └── firmware.bin               ← Pre-built binary (latest release)
 ├── scripts/
 │   └── copy_firmware.py           ← PlatformIO post-build script
 ├── docs/
-│   └── wiring.md                  ← Wiring diagram + OTA guide
+│   ├── wiring.md                  ← Wiring diagram + OTA guide
+│   └── firmware/README.md         ← Firmware build notes
 ├── .github/workflows/
-│   └── build.yml                  ← CI build + GitHub release
-├── .gitignore
+│   ├── build.yml                  ← CI build + GitHub release
+│   └── pages.yml                  ← GitHub Pages deployment
+├── index.html                     ← Web flasher (GitHub Pages root)
 ├── platformio.ini
 └── README.md
 ```

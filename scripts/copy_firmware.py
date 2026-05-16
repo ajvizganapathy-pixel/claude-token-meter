@@ -18,8 +18,8 @@ def copy_firmware(source, target, env):
     shutil.copy(src, dest)
 
     size_kb = os.path.getsize(dest) // 1024
-    print(f"\n{'─'*55}")
-    print(f"  🚀  firmware.bin  →  flasher/firmware.bin  ({size_kb} KB)")
-    print(f"{'─'*55}\n")
+    print(f"\n{'='*55}")
+    print(f"  firmware.bin -> flasher/firmware.bin  ({size_kb} KB)")
+    print(f"{'='*55}\n")
 
 env.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", copy_firmware)

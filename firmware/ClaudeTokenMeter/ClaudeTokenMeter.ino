@@ -144,7 +144,6 @@ void i2sInit() {
   cfg.sample_rate          = I2S_SAMPLE_RATE;
   cfg.bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT;
   cfg.channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT;
-  cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
   cfg.intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1;
   cfg.dma_buf_count        = 8;
   cfg.dma_buf_len          = 256;
@@ -596,12 +595,12 @@ input[type=number]:focus{border-color:#7c3aed}
 </div>
 
 <script>
-function fmt(n){
+const fmt=n=>{
   if(n>=1e6)return(n/1e6).toFixed(2)+'M';
   if(n>=1e3)return(n/1e3).toFixed(1)+'K';
   return String(n||0);
-}
-async function refresh(){
+};
+const refresh=async()=>{
   try{
     const d=await(await fetch('/api/status')).json();
     document.getElementById('devname').textContent=d.device||'Claude Token Meter';
@@ -628,13 +627,13 @@ async function refresh(){
     else if(pct>=80){b.textContent='⚡ WARNING';b.className='badge b-warn';}
     else{b.textContent='● NOMINAL';b.className='badge b-ok';}
   }catch(e){}
-}
-async function setLimit(){
+};
+const setLimit=async()=>{
   const v=document.getElementById('inp-limit').value;
   if(!v||isNaN(v))return;
   await fetch('/api/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({weeklyLimit:parseInt(v)})});
   refresh();
-}
+};
 refresh();
 setInterval(refresh,8000);
 </script>
@@ -944,7 +943,7 @@ void checkAutoReset() {
   lastResetChk = now;
 
   time_t epoch = time(nullptr);
-  if (epoch < 1_000_000L) return;   // NTP not synced yet
+  if (epoch < 1000000L) return;   // NTP not synced yet
 
   // Epoch-day and epoch-week counters (UTC)
   long curDay  = (long)(epoch / 86400L);
@@ -1105,7 +1104,7 @@ void setup() {
   strlcpy(cfgLimit,   p_limit.getValue(),   sizeof(cfgLimit));
   if (strlen(cfgLimit) > 0) stats.weeklyLimit = atol(cfgLimit);
 
-  Serial.printf(F("[WiFi] Connected  IP: %s  RSSI: %d dBm\n"),
+  Serial.printf("[WiFi] Connected  IP: %s  RSSI: %d dBm\n",
                 WiFi.localIP().toString().c_str(), WiFi.RSSI());
   playPattern(2);   // Connected chime
 
@@ -1145,7 +1144,6 @@ void loop() {
   if (otaInProgress) return;   // freeze normal UI while flashing
 
   httpServer.handleClient();
-  MDNS.update();
 
   // ── Factory reset via BOOT hold ───────────────
   checkBootButton();
