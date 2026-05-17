@@ -6,470 +6,106 @@
 <title>Claude Token Meter — Web Flasher</title>
 <script src="https://unpkg.com/esptool-js@0.4.3/bundle.js"></script>
 <style>
-/* ── Fonts ─────────────────────────────────── */
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;700;800&display=swap');
-
-/* ── Reset & base ──────────────────────────── */
-*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-:root {
-  --bg:        #080810;
-  --surface:   #0e0e1a;
-  --border:    #1e1e32;
-  --border2:   #2a2a45;
-  --purple:    #7c3aed;
-  --purple2:   #a78bfa;
-  --purple3:   #c4b5fd;
-  --green:     #10b981;
-  --yellow:    #f59e0b;
-  --red:       #ef4444;
-  --text:      #e8e8f5;
-  --muted:     #6b6b8a;
-  --mono:      'JetBrains Mono', monospace;
-  --sans:      'Syne', sans-serif;
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#080810;--surface:#0e0e1a;--border:#1e1e32;--border2:#2a2a45;
+  --purple:#7c3aed;--purple2:#a78bfa;--purple3:#c4b5fd;
+  --green:#10b981;--yellow:#f59e0b;--red:#ef4444;
+  --text:#e8e8f5;--muted:#6b6b8a;
+  --mono:'JetBrains Mono',monospace;--sans:'Syne',sans-serif;
 }
-html { scroll-behavior: smooth; }
-body {
-  font-family: var(--sans);
-  background: var(--bg);
-  color: var(--text);
-  min-height: 100vh;
-  overflow-x: hidden;
-}
-
-/* ── Noise texture overlay ──────────────────── */
-body::before {
-  content: '';
-  position: fixed;
-  inset: 0;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
-  pointer-events: none;
-  z-index: 0;
-}
-
-/* ── Ambient glow ──────────────────────────── */
-.glow-bg {
-  position: fixed;
-  width: 600px; height: 600px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(124,58,237,.12) 0%, transparent 70%);
-  top: -200px; left: 50%;
-  transform: translateX(-50%);
-  pointer-events: none;
-  z-index: 0;
-}
-
-/* ── Layout ────────────────────────────────── */
-.wrap {
-  position: relative;
-  z-index: 1;
-  max-width: 700px;
-  margin: 0 auto;
-  padding: 0 20px 60px;
-}
-
-/* ── Header ────────────────────────────────── */
-header {
-  text-align: center;
-  padding: 60px 0 40px;
-}
-.logo-ring {
-  display: inline-flex;
-  align-items: center; justify-content: center;
-  width: 80px; height: 80px;
-  border-radius: 24px;
-  background: linear-gradient(135deg, #1a0a2e, #2d1b69);
-  border: 1px solid var(--border2);
-  font-size: 36px;
-  margin-bottom: 20px;
-  box-shadow: 0 0 40px rgba(124,58,237,.3);
-}
-header h1 {
-  font-size: clamp(22px, 5vw, 32px);
-  font-weight: 800;
-  letter-spacing: -0.5px;
-}
-header h1 span { color: var(--purple2); }
-header p {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--muted);
-  margin-top: 8px;
-  letter-spacing: .5px;
-}
-.tag {
-  display: inline-block;
-  padding: 4px 12px;
-  border-radius: 20px;
-  background: rgba(124,58,237,.15);
-  border: 1px solid rgba(124,58,237,.3);
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--purple3);
-  margin-top: 12px;
-  letter-spacing: .5px;
-}
-
-/* ── Cards ─────────────────────────────────── */
-.card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  padding: 24px;
-  margin: 14px 0;
-  transition: border-color .2s;
-}
-.card:hover { border-color: var(--border2); }
-.card-title {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 1.5px;
-  margin-bottom: 16px;
-  display: flex; align-items: center; gap: 8px;
-}
-.card-title::before {
-  content: '';
-  display: inline-block;
-  width: 6px; height: 6px;
-  border-radius: 50%;
-  background: var(--purple);
-}
-
-/* ── Steps ─────────────────────────────────── */
-.steps { counter-reset: step; list-style: none; }
-.step-item {
-  counter-increment: step;
-  display: flex; gap: 16px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--border);
-  align-items: flex-start;
-}
-.step-item:last-child { border-bottom: none; padding-bottom: 0; }
-.step-num {
-  flex-shrink: 0;
-  width: 28px; height: 28px;
-  border-radius: 8px;
-  background: rgba(124,58,237,.15);
-  border: 1px solid rgba(124,58,237,.3);
-  display: flex; align-items: center; justify-content: center;
-  font-family: var(--mono);
-  font-size: 12px;
-  font-weight: 700;
-  color: var(--purple2);
-}
-.step-num::before { content: counter(step); }
-.step-text { font-size: 14px; line-height: 1.6; color: #b8b8d0; }
-.step-text strong { color: var(--text); }
-.step-text code {
-  font-family: var(--mono);
-  font-size: 12px;
-  background: rgba(124,58,237,.1);
-  border: 1px solid rgba(124,58,237,.2);
-  padding: 1px 6px;
-  border-radius: 4px;
-  color: var(--purple3);
-}
-
-/* ── Firmware select ────────────────────────── */
-.fw-row {
-  display: flex; gap: 10px; align-items: center;
-  flex-wrap: wrap;
-}
-.fw-input {
-  flex: 1;
-  min-width: 0;
-  font-family: var(--mono);
-  font-size: 13px;
-  color: var(--text);
-  background: #0a0a14;
-  border: 1px solid var(--border2);
-  border-radius: 10px;
-  padding: 10px 14px;
-  outline: none;
-  transition: border-color .2s;
-  cursor: pointer;
-}
-.fw-input:focus, .fw-input:hover { border-color: var(--purple); }
-.fw-label {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 8px;
-}
-#fw-name {
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--green);
-  margin-top: 6px;
-  min-height: 18px;
-}
-
-/* ── GitHub release button ──────────────────── */
-.btn-gh {
-  background: linear-gradient(135deg, #0d1117, #161b22);
-  color: var(--purple2);
-  border: 1px solid rgba(124,58,237,.35);
-  box-shadow: 0 4px 16px rgba(124,58,237,.1);
-  font-size: 14px;
-  margin-bottom: 10px;
-}
-.btn-gh:hover:not(:disabled) {
-  background: linear-gradient(135deg, #161b22, #21262d);
-  border-color: rgba(124,58,237,.6);
-  box-shadow: 0 4px 24px rgba(124,58,237,.25);
-  transform: translateY(-1px);
-}
-.release-tag {
-  display: inline-block;
-  font-family: var(--mono);
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 12px;
-  background: rgba(124,58,237,.15);
-  border: 1px solid rgba(124,58,237,.3);
-  color: var(--purple3);
-  margin-left: 6px;
-}
-
-/* ── Baud select ────────────────────────────── */
-.baud-row { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
-.baud-btn {
-  font-family: var(--mono);
-  font-size: 12px;
-  padding: 6px 14px;
-  border-radius: 8px;
-  border: 1px solid var(--border2);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-  transition: all .15s;
-}
-.baud-btn.active {
-  background: rgba(124,58,237,.2);
-  border-color: var(--purple);
-  color: var(--purple2);
-}
-.baud-btn:hover:not(.active) { border-color: var(--border2); color: var(--text); }
-
-/* ── Buttons ─────────────────────────────────── */
-.btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-  padding: 13px 28px;
-  border-radius: 12px;
-  border: none;
-  font-family: var(--sans);
-  font-size: 15px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all .2s;
-  width: 100%;
-  letter-spacing: .3px;
-}
-.btn-connect {
-  background: linear-gradient(135deg, #1e1040, #2d1b69);
-  color: var(--purple2);
-  border: 1px solid rgba(124,58,237,.4);
-  box-shadow: 0 4px 20px rgba(124,58,237,.15);
-}
-.btn-connect:hover:not(:disabled) {
-  background: linear-gradient(135deg, #2a1858, #3d2a7e);
-  box-shadow: 0 4px 30px rgba(124,58,237,.3);
-  transform: translateY(-1px);
-}
-.btn-flash {
-  background: linear-gradient(135deg, var(--purple), #5b21b6);
-  color: #fff;
-  box-shadow: 0 4px 20px rgba(124,58,237,.25);
-}
-.btn-flash:hover:not(:disabled) {
-  background: linear-gradient(135deg, #8b46ff, #6d28d9);
-  box-shadow: 0 4px 30px rgba(124,58,237,.4);
-  transform: translateY(-1px);
-}
-.btn-reset {
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--border2);
-}
-.btn-reset:hover:not(:disabled) { color: var(--text); border-color: var(--border2); }
-.btn:disabled { opacity: .35; cursor: not-allowed; transform: none !important; }
-
-.btn-group { display: flex; gap: 10px; margin-top: 12px; }
-.btn-group .btn-reset { flex: 0 0 auto; width: auto; padding: 13px 20px; }
-
-/* ── Status / State ─────────────────────────── */
-.status-bar {
-  display: flex; align-items: center; gap: 10px;
-  padding: 12px 16px;
-  border-radius: 10px;
-  background: #0a0a14;
-  border: 1px solid var(--border);
-  margin-bottom: 16px;
-  font-family: var(--mono);
-  font-size: 13px;
-  min-height: 44px;
-}
-.status-dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  flex-shrink: 0;
-  transition: background .3s;
-}
-.dot-idle    { background: var(--muted); }
-.dot-busy    { background: var(--yellow); animation: pulsedot 1s infinite; }
-.dot-ok      { background: var(--green);  animation: pulsedot 2s infinite; }
-.dot-error   { background: var(--red); }
-
-@keyframes pulsedot {
-  0%,100% { box-shadow: 0 0 0 0 currentColor; }
-  50%      { box-shadow: 0 0 0 4px transparent; }
-}
-
-/* ── Progress bar ───────────────────────────── */
-.prog-wrap { margin: 8px 0; }
-.prog-bg {
-  height: 6px;
-  border-radius: 3px;
-  background: var(--border);
-  overflow: hidden;
-}
-.prog-fill {
-  height: 100%;
-  border-radius: 3px;
-  background: linear-gradient(90deg, var(--purple), var(--purple2));
-  transition: width .3s ease;
-  width: 0%;
-}
-.prog-label {
-  display: flex; justify-content: space-between;
-  font-family: var(--mono); font-size: 11px;
-  color: var(--muted); margin-top: 5px;
-}
-
-/* ── Terminal log ───────────────────────────── */
-.terminal {
-  background: #020208;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 16px;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.7;
-  max-height: 260px;
-  overflow-y: auto;
-  scroll-behavior: smooth;
-}
-.terminal::-webkit-scrollbar { width: 4px; }
-.terminal::-webkit-scrollbar-track { background: transparent; }
-.terminal::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
-.log-info   { color: #8888a8; }
-.log-ok     { color: var(--green); }
-.log-warn   { color: var(--yellow); }
-.log-error  { color: var(--red); }
-.log-data   { color: var(--purple3); }
-.log-cursor { display: inline-block; width: 8px; height: 14px; background: var(--purple2); animation: blink .8s infinite; vertical-align: text-bottom; }
-@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
-
-/* ── Wiring table ───────────────────────────── */
-.wire-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.wire-table th {
-  font-family: var(--mono);
-  font-size: 11px;
-  color: var(--muted);
-  text-align: left;
-  padding: 6px 12px;
-  border-bottom: 1px solid var(--border2);
-  font-weight: 400;
-  letter-spacing: .5px;
-}
-.wire-table td {
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  font-family: var(--mono);
-  font-size: 12px;
-}
-.wire-table tr:last-child td { border-bottom: none; }
-.wire-table tr:hover td { background: rgba(124,58,237,.04); }
-.pin-chip {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: 5px;
-  font-size: 11px;
-  font-weight: 600;
-}
-.pin-3v3  { background: rgba(239,68,68,.15);  color: #f87171; }
-.pin-gnd  { background: rgba(107,114,128,.15); color: #9ca3af; }
-.pin-data { background: rgba(124,58,237,.15);  color: #a78bfa; }
-.pin-gpio { background: rgba(16,185,129,.15);  color: #34d399; }
-
-/* ── Chip badge ─────────────────────────────── */
-.chip-info {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 8px 14px;
-  border-radius: 10px;
-  background: rgba(16,185,129,.08);
-  border: 1px solid rgba(16,185,129,.2);
-  font-family: var(--mono);
-  font-size: 12px;
-  color: var(--green);
-}
-
-/* ── Success overlay ────────────────────────── */
-#success-banner {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(8,8,16,.9);
-  backdrop-filter: blur(8px);
-  z-index: 100;
-  align-items: center; justify-content: center;
-  flex-direction: column; gap: 16px;
-  text-align: center;
-}
-#success-banner.show { display: flex; animation: fadein .4s ease; }
-@keyframes fadein { from{opacity:0;transform:scale(.95)} to{opacity:1;transform:scale(1)} }
-.success-icon { font-size: 64px; animation: bounce .5s ease; }
-@keyframes bounce { 0%{transform:scale(0)} 60%{transform:scale(1.15)} 100%{transform:scale(1)} }
-.success-title { font-size: 28px; font-weight: 800; color: var(--green); }
-.success-sub   { font-family: var(--mono); font-size: 13px; color: var(--muted); }
-.success-close {
-  margin-top: 8px;
-  padding: 10px 24px;
-  border-radius: 10px;
-  border: 1px solid rgba(16,185,129,.3);
-  background: rgba(16,185,129,.1);
-  color: var(--green);
-  font-family: var(--sans);
-  font-weight: 600;
-  cursor: pointer;
-  font-size: 14px;
-}
-
-/* ── Footer ─────────────────────────────────── */
-footer {
-  text-align: center;
-  font-family: var(--mono);
-  font-size: 11px;
-  color: #333355;
-  padding-top: 20px;
-}
-footer a { color: var(--muted); text-decoration: none; }
-footer a:hover { color: var(--purple2); }
-
-/* ── Responsive ──────────────────────────────── */
-@media (max-width: 480px) {
-  .fw-row { flex-direction: column; }
-  .btn-group { flex-direction: column; }
-  .btn-group .btn-reset { width: 100%; }
-}
+body{font-family:var(--sans);background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+body::before{content:'';position:fixed;inset:0;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='200' height='200' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");pointer-events:none;z-index:0}
+.glow-bg{position:fixed;width:600px;height:600px;border-radius:50%;background:radial-gradient(circle,rgba(124,58,237,.12) 0%,transparent 70%);top:-200px;left:50%;transform:translateX(-50%);pointer-events:none;z-index:0}
+.wrap{position:relative;z-index:1;max-width:700px;margin:0 auto;padding:0 20px 60px}
+header{text-align:center;padding:60px 0 40px}
+.logo-ring{display:inline-flex;align-items:center;justify-content:center;width:80px;height:80px;border-radius:24px;background:linear-gradient(135deg,#1a0a2e,#2d1b69);border:1px solid var(--border2);font-size:36px;margin-bottom:20px;box-shadow:0 0 40px rgba(124,58,237,.3)}
+header h1{font-size:clamp(22px,5vw,32px);font-weight:800;letter-spacing:-.5px}
+header h1 span{color:var(--purple2)}
+header p{font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:8px;letter-spacing:.5px}
+.tag{display:inline-block;padding:4px 12px;border-radius:20px;background:rgba(124,58,237,.15);border:1px solid rgba(124,58,237,.3);font-family:var(--mono);font-size:11px;color:var(--purple3);margin-top:12px;letter-spacing:.5px}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px;margin:14px 0;transition:border-color .2s}
+.card:hover{border-color:var(--border2)}
+.card-title{font-family:var(--mono);font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.card-title::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--purple)}
+.steps{counter-reset:step;list-style:none}
+.step-item{counter-increment:step;display:flex;gap:16px;padding:12px 0;border-bottom:1px solid var(--border);align-items:flex-start}
+.step-item:last-child{border-bottom:none;padding-bottom:0}
+.step-num{flex-shrink:0;width:28px;height:28px;border-radius:8px;background:rgba(124,58,237,.15);border:1px solid rgba(124,58,237,.3);display:flex;align-items:center;justify-content:center;font-family:var(--mono);font-size:12px;font-weight:700;color:var(--purple2)}
+.step-num::before{content:counter(step)}
+.step-text{font-size:14px;line-height:1.6;color:#b8b8d0}
+.step-text strong{color:var(--text)}
+.step-text code{font-family:var(--mono);font-size:12px;background:rgba(124,58,237,.1);border:1px solid rgba(124,58,237,.2);padding:1px 6px;border-radius:4px;color:var(--purple3)}
+.fw-label{font-family:var(--mono);font-size:12px;color:var(--muted);margin-bottom:8px}
+#fw-name{font-family:var(--mono);font-size:12px;color:var(--green);margin-top:6px;min-height:18px}
+.fw-or-row{display:flex;align-items:center;gap:10px;margin:12px 0}
+.fw-or-row::before,.fw-or-row::after{content:'';flex:1;height:1px;background:var(--border)}
+.fw-or-label{font-family:var(--mono);font-size:11px;color:var(--muted)}
+.baud-row{display:flex;gap:8px;margin-top:12px;flex-wrap:wrap}
+.baud-btn{font-family:var(--mono);font-size:12px;padding:6px 14px;border-radius:8px;border:1px solid var(--border2);background:transparent;color:var(--muted);cursor:pointer;transition:all .15s}
+.baud-btn.active{background:rgba(124,58,237,.2);border-color:var(--purple);color:var(--purple2)}
+.baud-btn:hover:not(.active){border-color:var(--border2);color:var(--text)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:13px 28px;border-radius:12px;border:none;font-family:var(--sans);font-size:15px;font-weight:700;cursor:pointer;transition:all .2s;width:100%;letter-spacing:.3px}
+.btn-gh{background:linear-gradient(135deg,#161b22,#21262d);color:#e6edf3;border:1px solid #30363d;box-shadow:0 2px 8px rgba(0,0,0,.3)}
+.btn-gh:hover:not(:disabled){background:linear-gradient(135deg,#21262d,#2d333b);border-color:#8b949e;transform:translateY(-1px)}
+.btn-file{background:rgba(124,58,237,.08);color:var(--purple2);border:1px solid rgba(124,58,237,.25);cursor:pointer}
+.btn-file:hover{background:rgba(124,58,237,.15)}
+.btn-connect{background:linear-gradient(135deg,#1e1040,#2d1b69);color:var(--purple2);border:1px solid rgba(124,58,237,.4);box-shadow:0 4px 20px rgba(124,58,237,.15)}
+.btn-connect:hover:not(:disabled){background:linear-gradient(135deg,#2a1858,#3d2a7e);box-shadow:0 4px 30px rgba(124,58,237,.3);transform:translateY(-1px)}
+.btn-flash{background:linear-gradient(135deg,var(--purple),#5b21b6);color:#fff;box-shadow:0 4px 20px rgba(124,58,237,.25)}
+.btn-flash:hover:not(:disabled){background:linear-gradient(135deg,#8b46ff,#6d28d9);box-shadow:0 4px 30px rgba(124,58,237,.4);transform:translateY(-1px)}
+.btn-reset{background:transparent;color:var(--muted);border:1px solid var(--border2)}
+.btn-reset:hover:not(:disabled){color:var(--text);border-color:var(--border2)}
+.btn:disabled{opacity:.35;cursor:not-allowed;transform:none!important}
+.btn-group{display:flex;gap:10px;margin-top:12px}
+.btn-group .btn-reset{flex:0 0 auto;width:auto;padding:13px 20px}
+.status-bar{display:flex;align-items:center;gap:10px;padding:12px 16px;border-radius:10px;background:#0a0a14;border:1px solid var(--border);margin-bottom:16px;font-family:var(--mono);font-size:13px;min-height:44px}
+.status-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;transition:background .3s}
+.dot-idle{background:var(--muted)}
+.dot-busy{background:var(--yellow);animation:pulsedot 1s infinite}
+.dot-ok{background:var(--green);animation:pulsedot 2s infinite}
+.dot-error{background:var(--red)}
+@keyframes pulsedot{0%,100%{box-shadow:0 0 0 0 currentColor}50%{box-shadow:0 0 0 4px transparent}}
+.prog-wrap{margin:8px 0}
+.prog-bg{height:6px;border-radius:3px;background:var(--border);overflow:hidden}
+.prog-fill{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--purple),var(--purple2));transition:width .3s ease;width:0%}
+.prog-label{display:flex;justify-content:space-between;font-family:var(--mono);font-size:11px;color:var(--muted);margin-top:5px}
+.terminal{background:#020208;border:1px solid var(--border);border-radius:12px;padding:16px;font-family:var(--mono);font-size:12px;line-height:1.7;max-height:260px;overflow-y:auto;scroll-behavior:smooth}
+.terminal::-webkit-scrollbar{width:4px}
+.terminal::-webkit-scrollbar-track{background:transparent}
+.terminal::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+.log-info{color:#8888a8}.log-ok{color:var(--green)}.log-warn{color:var(--yellow)}.log-error{color:var(--red)}.log-data{color:var(--purple3)}
+.log-cursor{display:inline-block;width:8px;height:14px;background:var(--purple2);animation:blink .8s infinite;vertical-align:text-bottom}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
+.gh-status{font-family:var(--mono);font-size:12px;margin-top:8px;min-height:18px;color:var(--muted)}
+.wire-table{width:100%;border-collapse:collapse;font-size:13px}
+.wire-table th{font-family:var(--mono);font-size:11px;color:var(--muted);text-align:left;padding:6px 12px;border-bottom:1px solid var(--border2);font-weight:400;letter-spacing:.5px}
+.wire-table td{padding:8px 12px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px}
+.wire-table tr:last-child td{border-bottom:none}
+.wire-table tr:hover td{background:rgba(124,58,237,.04)}
+.pin-chip{display:inline-block;padding:2px 8px;border-radius:5px;font-size:11px;font-weight:600}
+.pin-3v3{background:rgba(239,68,68,.15);color:#f87171}
+.pin-gnd{background:rgba(107,114,128,.15);color:#9ca3af}
+.pin-data{background:rgba(124,58,237,.15);color:#a78bfa}
+.pin-gpio{background:rgba(16,185,129,.15);color:#34d399}
+#success-banner{display:none;position:fixed;inset:0;background:rgba(8,8,16,.9);backdrop-filter:blur(8px);z-index:100;align-items:center;justify-content:center;flex-direction:column;gap:16px;text-align:center}
+#success-banner.show{display:flex;animation:fadein .4s ease}
+@keyframes fadein{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
+.success-icon{font-size:64px;animation:bounce .5s ease}
+@keyframes bounce{0%{transform:scale(0)}60%{transform:scale(1.15)}100%{transform:scale(1)}}
+.success-title{font-size:28px;font-weight:800;color:var(--green)}
+.success-sub{font-family:var(--mono);font-size:13px;color:var(--muted)}
+.success-close{margin-top:8px;padding:10px 24px;border-radius:10px;border:1px solid rgba(16,185,129,.3);background:rgba(16,185,129,.1);color:var(--green);font-family:var(--sans);font-weight:600;cursor:pointer;font-size:14px}
+footer{text-align:center;font-family:var(--mono);font-size:11px;color:#333355;padding-top:20px}
+footer a{color:var(--muted);text-decoration:none}
+footer a:hover{color:var(--purple2)}
+@media(max-width:480px){.btn-group{flex-direction:column}.btn-group .btn-reset{width:100%}}
 </style>
 </head>
 <body>
-
 <div class="glow-bg"></div>
 
-<!-- ╔══════════ SUCCESS OVERLAY ══════════╗ -->
 <div id="success-banner">
   <div class="success-icon">✅</div>
   <div class="success-title">Flash Complete!</div>
@@ -478,8 +114,6 @@ footer a:hover { color: var(--purple2); }
 </div>
 
 <div class="wrap">
-
-  <!-- ╔══════════ HEADER ══════════╗ -->
   <header>
     <div class="logo-ring">🤖</div>
     <h1>Claude <span>Token Meter</span><br>Web Flasher</h1>
@@ -487,64 +121,32 @@ footer a:hover { color: var(--purple2); }
     <div class="tag">Requires Chrome / Edge 89+ with Web Serial API</div>
   </header>
 
-  <!-- ╔══════════ HOW TO ENTER BOOT MODE ══════════╗ -->
   <div class="card">
     <div class="card-title">Before You Flash</div>
     <ul class="steps">
-      <li class="step-item">
-        <div class="step-num"></div>
-        <div class="step-text">
-          Connect your <strong>XIAO ESP32-S3</strong> via USB-C to your computer.
-        </div>
-      </li>
-      <li class="step-item">
-        <div class="step-num"></div>
-        <div class="step-text">
-          Enter <strong>bootloader mode</strong>: hold the <code>BOOT</code> button (B),
-          press and release <code>RESET</code> (R), then release <code>BOOT</code>.
-          The board will appear as a serial port — no LED blink is normal.
-        </div>
-      </li>
-      <li class="step-item">
-        <div class="step-num"></div>
-        <div class="step-text">
-          Select the <strong>firmware.bin</strong> file below (build it first
-          with PlatformIO: <code>pio run -t upload</code>, then copy
-          <code>.pio/build/xiao_esp32s3/firmware.bin</code> here),
-          or use the pre-built release binary.
-        </div>
-      </li>
-      <li class="step-item">
-        <div class="step-num"></div>
-        <div class="step-text">
-          Click <strong>Connect</strong>, pick the serial port, then <strong>Flash</strong>.
-          The board will reset automatically when done.
-        </div>
-      </li>
+      <li class="step-item"><div class="step-num"></div><div class="step-text">Connect your <strong>XIAO ESP32-S3</strong> via USB-C to your computer.</div></li>
+      <li class="step-item"><div class="step-num"></div><div class="step-text">Enter <strong>bootloader mode</strong>: hold the <code>BOOT</code> button (B), press and release <code>RESET</code> (R), then release <code>BOOT</code>. The board will appear as a serial port — no LED blink is normal.</div></li>
+      <li class="step-item"><div class="step-num"></div><div class="step-text">Click <strong>Download Latest Firmware</strong> below to fetch the binary automatically, or select a local file.</div></li>
+      <li class="step-item"><div class="step-num"></div><div class="step-text">Click <strong>Connect</strong>, pick the serial port, then <strong>Flash</strong>. The board resets automatically when done.</div></li>
     </ul>
   </div>
 
-  <!-- ╔══════════ FIRMWARE ══════════╗ -->
   <div class="card">
-    <div class="card-title">Firmware File</div>
+    <div class="card-title">Firmware</div>
 
-    <!-- GitHub Release download -->
-    <button class="btn btn-gh" id="btn-gh-download" onclick="downloadFromGitHub()">
-      <span>⬇</span> Download Latest Firmware from GitHub
-      <span class="release-tag" id="release-tag">checking...</span>
+    <button class="btn btn-gh" id="btn-gh" onclick="downloadFromGitHub()">
+      ⬇ Download Latest Firmware from GitHub
     </button>
-    <div id="gh-status" style="font-family:var(--mono);font-size:12px;color:var(--muted);margin-top:6px;margin-bottom:2px;min-height:18px;text-align:center">checking...</div>
+    <div class="gh-status" id="gh-status">Checking GitHub for latest release...</div>
 
-    <div class="fw-label" style="margin-top:4px;margin-bottom:4px;text-align:center;font-size:11px">— or select a local file —</div>
+    <div class="fw-or-row"><span class="fw-or-label">— or select a local file —</span></div>
+
     <div class="fw-label">Select firmware.bin</div>
-    <div class="fw-row">
-      <input type="file" id="fw-file" class="fw-input" accept=".bin">
-    </div>
+    <input type="file" id="fw-file" accept=".bin" style="font-family:var(--mono);font-size:13px;color:var(--text);background:#0a0a14;border:1px solid var(--border2);border-radius:10px;padding:10px 14px;outline:none;width:100%;cursor:pointer">
     <div id="fw-name">No file selected</div>
 
-    <div class="fw-label" style="margin-top:16px">Flash offset (leave as-is for XIAO ESP32-S3)</div>
-    <input type="text" id="flash-offset" value="0x0"
-           style="font-family:var(--mono);font-size:13px;color:var(--purple3);background:#0a0a14;border:1px solid var(--border2);border-radius:8px;padding:8px 12px;outline:none;width:120px">
+    <div class="fw-label" style="margin-top:16px">Flash offset</div>
+    <input type="text" id="flash-offset" value="0x0" style="font-family:var(--mono);font-size:13px;color:var(--purple3);background:#0a0a14;border:1px solid var(--border2);border-radius:8px;padding:8px 12px;outline:none;width:120px">
 
     <div class="fw-label" style="margin-top:16px">Baud rate</div>
     <div class="baud-row">
@@ -554,49 +156,30 @@ footer a:hover { color: var(--purple2); }
     </div>
   </div>
 
-  <!-- ╔══════════ FLASH PANEL ══════════╗ -->
   <div class="card">
     <div class="card-title">Flash</div>
-
-    <!-- Status bar -->
     <div class="status-bar" id="status-bar">
       <div class="status-dot dot-idle" id="status-dot"></div>
-      <span id="status-text">Ready — select firmware and connect</span>
+      <span id="status-text">Ready — download or select firmware, then connect</span>
     </div>
-
-    <!-- Progress -->
     <div class="prog-wrap" id="prog-wrap" style="display:none">
       <div class="prog-bg"><div class="prog-fill" id="prog-fill"></div></div>
-      <div class="prog-label">
-        <span id="prog-label-left">Writing...</span>
-        <span id="prog-label-right">0%</span>
-      </div>
+      <div class="prog-label"><span id="prog-label-left">Writing...</span><span id="prog-label-right">0%</span></div>
     </div>
-
-    <!-- Chip info (shown after connect) -->
     <div id="chip-info" style="display:none;margin-bottom:12px">
-      <div class="chip-info">
-        <span>🔌</span>
-        <span id="chip-text">Connected</span>
+      <div style="display:inline-flex;align-items:center;gap:8px;padding:8px 14px;border-radius:10px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.2);font-family:var(--mono);font-size:12px;color:var(--green)">
+        <span>🔌</span><span id="chip-text">Connected</span>
       </div>
     </div>
-
-    <!-- Action buttons -->
     <div class="btn-group">
-      <button class="btn btn-connect" id="btn-connect" onclick="handleConnect()">
-        <span>⚡</span> Connect
-      </button>
-      <button class="btn btn-reset" id="btn-reset" onclick="handleDisconnect()" disabled>
-        Disconnect
-      </button>
+      <button class="btn btn-connect" id="btn-connect" onclick="handleConnect()"><span>⚡</span> Connect</button>
+      <button class="btn btn-reset" id="btn-reset" onclick="handleDisconnect()" disabled>Disconnect</button>
     </div>
-
     <button class="btn btn-flash" id="btn-flash" onclick="handleFlash()" disabled style="margin-top:10px">
       <span id="flash-icon">🚀</span> <span id="flash-label">Flash Firmware</span>
     </button>
   </div>
 
-  <!-- ╔══════════ TERMINAL ══════════╗ -->
   <div class="card">
     <div class="card-title" style="justify-content:space-between">
       <span>Serial Log</span>
@@ -604,21 +187,15 @@ footer a:hover { color: var(--purple2); }
     </div>
     <div class="terminal" id="terminal">
       <span class="log-info">Claude Token Meter Web Flasher  v1.1.0</span><br>
-      <span class="log-info">────────────────────────────────────</span><br>
+      <span class="log-info">────────────────────────────────────────</span><br>
       <span class="log-info">Waiting for connection...</span><br>
       <span class="log-cursor"></span>
     </div>
   </div>
 
-  <!-- ╔══════════ WIRING ══════════╗ -->
   <div class="card">
     <div class="card-title">Wiring Reference</div>
-
-    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">
-      All connections use 3.3V logic. The XIAO ESP32-S3 operates at 3.3V.
-    </p>
-
-    <!-- OLED -->
+    <p style="font-size:13px;color:var(--muted);margin-bottom:14px">All connections use 3.3V logic.</p>
     <p style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px">SSD1306 OLED 0.96"</p>
     <table class="wire-table" style="margin-bottom:18px">
       <tr><th>OLED Pin</th><th>XIAO ESP32-S3</th><th>GPIO</th><th>Note</th></tr>
@@ -627,530 +204,373 @@ footer a:hover { color: var(--purple2); }
       <tr><td><span class="pin-data">SDA</span></td><td>D4 / SDA</td><td><span class="pin-gpio">GPIO5</span></td><td>I2C Data</td></tr>
       <tr><td><span class="pin-data">SCL</span></td><td>D5 / SCL</td><td><span class="pin-gpio">GPIO6</span></td><td>I2C Clock</td></tr>
     </table>
-
-    <!-- MAX98357 -->
     <p style="font-family:var(--mono);font-size:11px;color:var(--muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:1px">MAX98357 I2S Amplifier</p>
     <table class="wire-table">
       <tr><th>MAX98357 Pin</th><th>XIAO ESP32-S3</th><th>GPIO</th><th>Note</th></tr>
-      <tr><td><span class="pin-3v3">VIN</span></td><td>3V3</td><td>—</td><td>Power (3.3 – 5.5V)</td></tr>
+      <tr><td><span class="pin-3v3">VIN</span></td><td>3V3</td><td>—</td><td>Power (3.3–5.5V)</td></tr>
       <tr><td><span class="pin-gnd">GND</span></td><td>GND</td><td>—</td><td>Ground</td></tr>
       <tr><td><span class="pin-data">BCLK</span></td><td>D8</td><td><span class="pin-gpio">GPIO7</span></td><td>I2S Bit Clock</td></tr>
       <tr><td><span class="pin-data">LRC</span></td><td>D9</td><td><span class="pin-gpio">GPIO8</span></td><td>I2S Word Select</td></tr>
       <tr><td><span class="pin-data">DIN</span></td><td>D10</td><td><span class="pin-gpio">GPIO9</span></td><td>I2S Data</td></tr>
-      <tr><td><span class="pin-gnd">SD</span></td><td>Leave unconnected</td><td>—</td><td>Always-on (float)</td></tr>
-      <tr><td><span class="pin-gnd">GAIN</span></td><td>GND</td><td>—</td><td>9 dB gain (or float=12dB)</td></tr>
+      <tr><td><span class="pin-gnd">SD</span></td><td>Leave unconnected</td><td>—</td><td>Always-on</td></tr>
+      <tr><td><span class="pin-gnd">GAIN</span></td><td>GND</td><td>—</td><td>9 dB gain</td></tr>
     </table>
   </div>
 
-  <!-- ╔══════════ AFTER FLASH ══════════╗ -->
   <div class="card">
     <div class="card-title">After Flashing</div>
     <ul class="steps">
-      <li class="step-item">
-        <div class="step-num"></div>
-        <div class="step-text">
-          The device reboots and creates an open WiFi AP: <code>ClaudeTokenMeter</code>
-        </div>
-      </li>
-      <li class="step-item">
-        <div class="step-num"></div>
-        <div class="step-text">
-          Connect your phone/laptop to <code>ClaudeTokenMeter</code> (no password).
-          A captive portal appears automatically — if not, open <code>192.168.4.1</code>.
-        </div>
-      </li>
-      <li class="step-item">
-        <div class="step-num"></div>
-        <div class="step-text">
-          Enter your <strong>home WiFi credentials</strong>, optional Anthropic API key,
-          and weekly token limit. Click Save.
-        </div>
-      </li>
-      <li class="step-item">
-        <div class="step-num"></div>
-        <div class="step-text">
-          The display shows the main dashboard. Run the companion script on your PC:
-          <code>python companion/claude_monitor.py --discover</code>
-        </div>
-      </li>
+      <li class="step-item"><div class="step-num"></div><div class="step-text">The device reboots and creates an open WiFi AP: <code>ClaudeTokenMeter</code></div></li>
+      <li class="step-item"><div class="step-num"></div><div class="step-text">Connect your phone/laptop to <code>ClaudeTokenMeter</code> (no password). A captive portal opens — if not, go to <code>192.168.4.1</code>.</div></li>
+      <li class="step-item"><div class="step-num"></div><div class="step-text">Enter your <strong>home WiFi credentials</strong>, optional Anthropic API key, and weekly token limit. Click Save.</div></li>
+      <li class="step-item"><div class="step-num"></div><div class="step-text">Run the companion script: <code>python companion/claude_monitor.py --discover</code></div></li>
     </ul>
   </div>
 
-</div><!-- /wrap -->
+</div>
 
 <footer>
   Claude Token Meter &nbsp;•&nbsp; XIAO ESP32-S3 &nbsp;•&nbsp;
   <a href="https://github.com/ajvizganapathy-pixel/claude-token-meter" target="_blank">GitHub</a> &nbsp;•&nbsp;
   <a href="https://github.com/ajvizganapathy-pixel/claude-token-meter/releases" target="_blank">Releases</a> &nbsp;•&nbsp;
+  FW <span id="fw">v1.1.0</span> &nbsp;•&nbsp;
   Uses <a href="https://github.com/espressif/esptool-js" target="_blank">esptool-js</a>
 </footer>
 
-<!-- ════════════════════════════════════════════════════════
-     JAVASCRIPT
-════════════════════════════════════════════════════════ -->
 <script>
-// ── State ─────────────────────────────────────────────────
-let espLoader   = null;
-let transport   = null;
-let port        = null;
+// ── Constants ──────────────────────────────────────────────────
+const GITHUB_REPO  = 'ajvizganapathy-pixel/claude-token-meter';
+const GITHUB_ASSET = 'firmware.bin';
+
+// ── State ──────────────────────────────────────────────────────
+let espLoader    = null;
+let transport    = null;
+let port         = null;
 let selectedBaud = 921600;
 let firmwareData = null;
 let firmwareSize = 0;
 let isFlashing   = false;
 
-// ── DOM refs ──────────────────────────────────────────────
-const $btnConnect  = document.getElementById('btn-connect');
-const $btnFlash    = document.getElementById('btn-flash');
-const $btnReset    = document.getElementById('btn-reset');
-const $statusDot   = document.getElementById('status-dot');
-const $statusText  = document.getElementById('status-text');
-const $progWrap    = document.getElementById('prog-wrap');
-const $progFill    = document.getElementById('prog-fill');
-const $progL       = document.getElementById('prog-label-left');
-const $progR       = document.getElementById('prog-label-right');
-const $chipInfo    = document.getElementById('chip-info');
-const $chipText    = document.getElementById('chip-text');
-const $term        = document.getElementById('terminal');
-const $fwFile      = document.getElementById('fw-file');
-const $fwName      = document.getElementById('fw-name');
-const $flashIcon   = document.getElementById('flash-icon');
-const $flashLabel  = document.getElementById('flash-label');
+// ── DOM ─────────────────────────────────────────────────────────
+const $btnConnect = () => document.getElementById('btn-connect');
+const $btnFlash   = () => document.getElementById('btn-flash');
+const $btnReset   = () => document.getElementById('btn-reset');
+const $statusDot  = () => document.getElementById('status-dot');
+const $statusText = () => document.getElementById('status-text');
+const $progWrap   = () => document.getElementById('prog-wrap');
+const $progFill   = () => document.getElementById('prog-fill');
+const $progL      = () => document.getElementById('prog-label-left');
+const $progR      = () => document.getElementById('prog-label-right');
+const $chipInfo   = () => document.getElementById('chip-info');
+const $chipText   = () => document.getElementById('chip-text');
+const $term       = () => document.getElementById('terminal');
+const $fwName     = () => document.getElementById('fw-name');
+const $ghStatus   = () => document.getElementById('gh-status');
+const $fwFoot     = () => document.getElementById('fw');
 
-// ── Logging ───────────────────────────────────────────────
-function log(msg, type = 'info') {
-  const span = document.createElement('span');
-  span.className = `log-${type}`;
-  span.textContent = msg;
-  // Remove cursor
-  const cursor = $term.querySelector('.log-cursor');
+// ── Logging ─────────────────────────────────────────────────────
+function log(msg, type) {
+  type = type || 'info';
+  const t = $term();
+  if (!t) return;
+  const cursor = t.querySelector('.log-cursor');
   if (cursor) cursor.remove();
-  $term.appendChild(span);
-  $term.appendChild(document.createElement('br'));
-  // Re-add cursor
+  const span = document.createElement('span');
+  span.className = 'log-' + type;
+  span.textContent = msg;
+  t.appendChild(span);
+  t.appendChild(document.createElement('br'));
   const c = document.createElement('span');
   c.className = 'log-cursor';
-  $term.appendChild(c);
-  $term.scrollTop = $term.scrollHeight;
+  t.appendChild(c);
+  t.scrollTop = t.scrollHeight;
 }
-
 function clearLog() {
-  $term.innerHTML = '<span class="log-cursor"></span>';
+  const t = $term();
+  if (t) t.innerHTML = '<span class="log-cursor"></span>';
 }
 
-// ── Status UI ─────────────────────────────────────────────
-function setStatus(text, dotClass, showProg = false) {
-  $statusText.textContent = text;
-  $statusDot.className = `status-dot ${dotClass}`;
-  $progWrap.style.display = showProg ? 'block' : 'none';
+// ── Status UI ───────────────────────────────────────────────────
+function setStatus(text, dotClass, showProg) {
+  const st = $statusText(); if (st) st.textContent = text;
+  const sd = $statusDot();  if (sd) sd.className = 'status-dot ' + dotClass;
+  const pw = $progWrap();   if (pw) pw.style.display = showProg ? 'block' : 'none';
 }
-
 function setProgress(pct, left, right) {
-  $progFill.style.width = pct + '%';
-  $progL.textContent = left;
-  $progR.textContent = right;
+  const pf = $progFill(); if (pf) pf.style.width = pct + '%';
+  const pl = $progL();    if (pl) pl.textContent = left;
+  const pr = $progR();    if (pr) pr.textContent = right;
 }
 
-// ── Baud selection ────────────────────────────────────────
+// ── Baud ────────────────────────────────────────────────────────
 function setBaud(baud) {
   selectedBaud = baud;
-  document.querySelectorAll('.baud-btn').forEach(b => {
+  document.querySelectorAll('.baud-btn').forEach(function(b) {
     b.classList.toggle('active', parseInt(b.textContent) === baud);
   });
-  log(`Baud rate set to ${baud}`, 'data');
 }
 
-// ── Firmware file select ──────────────────────────────────
-$fwFile.addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-
-  if (!file.name.endsWith('.bin')) {
-    log('⚠  Please select a .bin file', 'warn');
-    return;
+// ── File picker ─────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', function() {
+  var ff = document.getElementById('fw-file');
+  if (ff) {
+    ff.addEventListener('change', function(e) {
+      var file = e.target.files[0];
+      if (!file || !file.name.endsWith('.bin')) {
+        log('Please select a .bin file', 'warn');
+        return;
+      }
+      var reader = new FileReader();
+      reader.onload = function(ev) {
+        var u8 = new Uint8Array(ev.target.result);
+        firmwareData = u8.reduce(function(acc, b) { return acc + String.fromCharCode(b); }, '');
+        firmwareSize = u8.length;
+        var fn = $fwName();
+        if (fn) fn.textContent = '✅  ' + file.name + '  (' + (firmwareSize/1024).toFixed(1) + ' KB)';
+        log('File loaded: ' + file.name + ' (' + (firmwareSize/1024).toFixed(1) + ' KB)', 'ok');
+        var bf = $btnFlash();
+        if (espLoader && bf) bf.disabled = false;
+      };
+      reader.readAsArrayBuffer(file);
+    });
   }
-
-  const buf = await file.arrayBuffer();
-  const u8  = new Uint8Array(buf);
-  // Convert to binary string as required by esptool-js
-  firmwareData = u8.reduce((acc, b) => acc + String.fromCharCode(b), '');
-  firmwareSize = u8.length;
-
-  $fwName.textContent = `✅  ${file.name}  (${(firmwareSize/1024).toFixed(1)} KB)`;
-  log(`Firmware loaded: ${file.name}  (${(firmwareSize/1024).toFixed(1)} KB)`, 'ok');
-
-  if (espLoader) $btnFlash.disabled = false;
 });
 
-// ── esptool-js terminal interface ─────────────────────────
-const termInterface = {
-  clean() { /* keep log */ },
-  writeLine(data) { log(data, 'data'); },
-  write(data)     { log(data, 'data'); },
-};
-
-// ── Connect ───────────────────────────────────────────────
-async function handleConnect() {
-  if (typeof Transport === 'undefined' || typeof ESPLoader === 'undefined') {
-    setStatus('esptool-js not loaded yet — please wait a moment and try again', 'dot-error');
-    log('❌ esptool-js bundle not ready. Reload the page if this persists.', 'error');
-    return;
-  }
-
-  if (espLoader) {
-    await handleDisconnect();
-    return;
-  }
-
-  if (!('serial' in navigator)) {
-    log('❌ Web Serial API not supported. Use Chrome or Edge 89+.', 'error');
-    setStatus('Web Serial not supported in this browser', 'dot-error');
-    return;
-  }
-
-  try {
-    setStatus('Requesting serial port...', 'dot-busy');
-    log('Requesting serial port access...', 'info');
-
-    port = await navigator.serial.requestPort();
-
-    log(`Connecting at ${selectedBaud} baud...`, 'info');
-    setStatus(`Connecting at ${selectedBaud} baud...`, 'dot-busy');
-
-    transport = new Transport(port, true);
-    espLoader = new ESPLoader({
-      transport,
-      baudrate:      selectedBaud,
-      romBaudrate:   115200,
-      terminal:      termInterface,
-      enableTracing: false,
-      debugLogging:  false,
-    });
-
-    const chip = await espLoader.main();
-
-    // Connected!
-    const flashSize = await espLoader.getFlashSize();
-    $chipInfo.style.display  = 'block';
-    $chipText.textContent    = `${chip}  |  Flash: ${flashSize} KB`;
-    $btnConnect.textContent  = '⚡ Connected';
-    $btnConnect.disabled     = true;
-    $btnReset.disabled       = false;
-
-    setStatus(`Connected — ${chip}`, 'dot-ok');
-    log(`✅  Connected to ${chip}  Flash: ${flashSize} KB`, 'ok');
-
-    if (firmwareData) $btnFlash.disabled = false;
-    else log('ℹ  Now select a firmware.bin file above', 'info');
-
-  } catch (err) {
-    espLoader = null; transport = null; port = null;
-    setStatus(`Connection failed: ${err.message || err}`, 'dot-error');
-    log(`❌  ${err.message || err}`, 'error');
-    log('Tip: Enter bootloader mode (hold BOOT → press RESET → release BOOT)', 'warn');
-  }
-}
-
-// ── Disconnect ────────────────────────────────────────────
-async function handleDisconnect() {
-  try {
-    if (transport) await transport.disconnect();
-  } catch (_) {}
-  espLoader = null; transport = null; port = null;
-  $btnConnect.innerHTML  = '<span>⚡</span> Connect';
-  $btnConnect.disabled   = false;
-  $btnReset.disabled     = true;
-  $btnFlash.disabled     = true;
-  $chipInfo.style.display = 'none';
-  setStatus('Disconnected', 'dot-idle');
-  log('Disconnected', 'warn');
-}
-
-// ── Flash ─────────────────────────────────────────────────
-async function handleFlash() {
-  if (!espLoader || !firmwareData || isFlashing) return;
-  isFlashing = true;
-
-  const offset = parseInt(document.getElementById('flash-offset').value, 16) || 0x0;
-
-  $btnFlash.disabled      = true;
-  $btnConnect.disabled    = true;
-  $flashIcon.textContent  = '⏳';
-  $flashLabel.textContent = 'Flashing...';
-  setStatus('Erasing flash...', 'dot-busy', true);
-  setProgress(0, 'Erasing...', '0%');
-
-  log(`Flash offset: 0x${offset.toString(16).toUpperCase()}  Size: ${(firmwareSize/1024).toFixed(1)} KB`, 'data');
-  log('Starting flash...', 'info');
-
-  try {
-    await espLoader.write_flash({
-      fileArray:   [{ data: firmwareData, address: offset }],
-      flashSize:   'keep',
-      flashMode:   'keep',
-      flashFreq:   'keep',
-      eraseAll:    false,
-      compress:    true,
-      reportProgress: (fileIndex, written, total) => {
-        const pct = Math.round((written / total) * 100);
-        const wKB = (written / 1024).toFixed(0);
-        const tKB = (total  / 1024).toFixed(0);
-        setProgress(pct, `Writing ${wKB} / ${tKB} KB`, `${pct}%`);
-        setStatus(`Flashing... ${pct}%`, 'dot-busy', true);
-      }
-    });
-
-    // Hard reset
-    setStatus('Resetting device...', 'dot-busy', true);
-    setProgress(100, 'Verifying & resetting...', '100%');
-    log('Verifying flash...', 'info');
-    await espLoader.after_flash('hard_reset');
-
-    setStatus('✅  Flash complete! Device is rebooting.', 'dot-ok');
-    setProgress(100, 'Done!', '100%');
-    $flashIcon.textContent  = '✅';
-    $flashLabel.textContent = 'Flash Complete';
-    log('✅  Firmware flashed successfully!', 'ok');
-    log('Device is rebooting. Connect to "ClaudeTokenMeter" WiFi to configure.', 'ok');
-
-    document.getElementById('success-banner').classList.add('show');
-
-    await handleDisconnect();
-
-  } catch (err) {
-    setStatus(`Flash error: ${err.message || err}`, 'dot-error');
-    log(`❌  Flash failed: ${err.message || err}`, 'error');
-    $flashIcon.textContent  = '🚀';
-    $flashLabel.textContent = 'Retry Flash';
-    $btnFlash.disabled      = false;
-  }
-
-  isFlashing = false;
-  $btnConnect.disabled = false;
-}
-
-// ── GitHub Releases ───────────────────────────────────────
-const GITHUB_REPO  = 'ajvizganapathy-pixel/claude-token-meter';
-const GITHUB_ASSET = 'firmware.bin';
-let latestRelease  = null;
-
-async function fetchLatestRelease() {
-  const $tag = document.getElementById('release-tag');
-  try {
-    const res  = await fetch(`https://api.github.com/repos/${GITHUB_REPO}/releases/latest`);
-    if (!res.ok) throw new Error(`GitHub API ${res.status}`);
-    latestRelease = await res.json();
-    const tag = latestRelease.tag_name || 'unknown';
-    $tag.textContent = tag;
-    log(`Latest release: ${tag}`, 'ok');
-  } catch (err) {
-    $tag.textContent = 'offline';
-    log(`GitHub check failed: ${err.message}`, 'warn');
-  }
-}
-
+// ── GitHub Download (multi-strategy CORS-safe) ──────────────────
 async function downloadFromGitHub() {
-  const $btn    = document.getElementById('btn-gh-download');
-  const $status = document.getElementById('gh-status');
-  const $fwNm   = document.getElementById('fw-name');
-
-  if (!$btn || !$status) {
-    console.error('Required DOM elements missing');
-    return;
-  }
-
-  $btn.disabled       = true;
-  $status.style.color = 'var(--muted)';
-  $status.textContent = '🔍 Querying GitHub Releases API...';
-  log('───────────────────────────────────────────', 'info');
-  log('Starting GitHub firmware download', 'info');
+  var btn = document.getElementById('btn-gh');
+  var gs  = $ghStatus();
+  if (btn) btn.disabled = true;
+  if (gs) { gs.style.color = 'var(--muted)'; gs.textContent = '🔍 Querying GitHub API...'; }
+  log('─────────────────────────────────────', 'info');
+  log('Fetching release info from GitHub...', 'info');
 
   try {
-    // ── Step 1: get release metadata (api.github.com has wildcard CORS) ──
-    const apiUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
-    log(`GET ${apiUrl}`, 'data');
+    // Step 1: release metadata — api.github.com always has CORS *
+    var apiRes = await fetch(
+      'https://api.github.com/repos/' + GITHUB_REPO + '/releases/latest',
+      { headers: { 'Accept': 'application/vnd.github+json' }, cache: 'no-cache' }
+    );
+    if (!apiRes.ok) throw new Error('GitHub API returned HTTP ' + apiRes.status);
+    var release = await apiRes.json();
+    var tag     = release.tag_name;
+    if (!tag) throw new Error('No tag_name in release response');
 
-    const metaRes = await fetch(apiUrl, {
-      headers: { 'Accept': 'application/vnd.github+json' },
-      cache:   'no-cache'
-    });
-
-    if (!metaRes.ok) {
-      const bodyText = await metaRes.text().catch(() => '');
-      throw new Error(`GitHub API HTTP ${metaRes.status}. ${bodyText.slice(0, 120)}`);
-    }
-
-    const release = await metaRes.json();
-    const tag     = release.tag_name;
-    if (!tag) throw new Error('Release metadata has no tag_name');
-
-    const asset = (release.assets || []).find(a => a.name === GITHUB_ASSET);
+    var asset = (release.assets || []).find(function(a) { return a.name === GITHUB_ASSET; });
     if (!asset) {
-      const found = (release.assets || []).map(a => a.name).join(', ') || '(none)';
-      throw new Error(`No "${GITHUB_ASSET}" in release ${tag}. Found: ${found}`);
+      var names = (release.assets || []).map(function(a) { return a.name; }).join(', ');
+      throw new Error('No ' + GITHUB_ASSET + ' in release ' + tag + '. Assets found: ' + (names || 'none'));
     }
+    log('Release ' + tag + ' — ' + GITHUB_ASSET + ' (' + (asset.size/1024).toFixed(1) + ' KB)', 'data');
+    if (gs) gs.textContent = '⬇ Downloading ' + tag + ' (' + (asset.size/1024).toFixed(1) + ' KB)...';
 
-    log(`Release ${tag} — asset id ${asset.id}, size ${(asset.size/1024).toFixed(1)} KB`, 'data');
-    $status.textContent = `⬇ Downloading firmware ${tag}...`;
-
-    // ── Step 2: multi-strategy binary download (handles GitHub CORS quirks) ──
-    // GitHub's release-asset downloads redirect to objects.githubusercontent.com
-    // which sometimes lacks CORS headers. We try 3 routes in order until one
-    // succeeds. The first (api.github.com asset endpoint with Accept:
-    // octet-stream) is the officially-documented CORS-safe path.
-    const strategies = [
+    // Step 2: try download routes in order
+    var routes = [
       {
-        name: 'Same-origin (GitHub Pages)',
-        fn: async () => {
-          const r = await fetch('./firmware.bin', { cache: 'no-cache' });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        name: 'api.github.com asset endpoint (CORS-safe)',
+        get: async function() {
+          var r = await fetch(
+            'https://api.github.com/repos/' + GITHUB_REPO + '/releases/assets/' + asset.id,
+            { headers: { 'Accept': 'application/octet-stream' }, cache: 'no-cache' }
+          );
+          if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.arrayBuffer();
         }
       },
       {
-        name: 'GitHub API asset endpoint',
-        fn: async () => {
-          const url = `https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${asset.id}`;
-          const r = await fetch(url, {
-            headers: { 'Accept': 'application/octet-stream' },
-            cache:   'no-cache'
-          });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        name: 'direct browser_download_url',
+        get: async function() {
+          var r = await fetch(asset.browser_download_url, { cache: 'no-cache' });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.arrayBuffer();
         }
       },
       {
-        name: 'Direct browser_download_url',
-        fn: async () => {
-          const r = await fetch(asset.browser_download_url, { cache: 'no-cache' });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        name: 'corsproxy.io',
+        get: async function() {
+          var r = await fetch('https://corsproxy.io/?' + encodeURIComponent(asset.browser_download_url), { cache: 'no-cache' });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.arrayBuffer();
         }
       },
       {
-        name: 'CORS proxy (corsproxy.io)',
-        fn: async () => {
-          const proxy = 'https://corsproxy.io/?';
-          const url   = proxy + encodeURIComponent(asset.browser_download_url);
-          const r = await fetch(url, { cache: 'no-cache' });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
-          return r.arrayBuffer();
-        }
-      },
-      {
-        name: 'CORS proxy (allorigins)',
-        fn: async () => {
-          const proxy = 'https://api.allorigins.win/raw?url=';
-          const url   = proxy + encodeURIComponent(asset.browser_download_url);
-          const r = await fetch(url, { cache: 'no-cache' });
-          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        name: 'allorigins.win',
+        get: async function() {
+          var r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(asset.browser_download_url), { cache: 'no-cache' });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
           return r.arrayBuffer();
         }
       }
     ];
 
-    let arrayBuf = null;
-    let lastErr  = null;
-
-    for (let i = 0; i < strategies.length; i++) {
-      const s = strategies[i];
+    var buf = null, lastErr = null;
+    for (var i = 0; i < routes.length; i++) {
       try {
-        $status.textContent = `⬇ Trying route ${i+1}/${strategies.length}: ${s.name}...`;
-        log(`Route ${i+1}: ${s.name}`, 'info');
-        arrayBuf = await s.fn();
-        // sanity check: at least 50 KB (firmware is ~700-900 KB normally)
-        if (arrayBuf.byteLength < 50 * 1024) {
-          throw new Error(`File too small: ${arrayBuf.byteLength} bytes (likely an error page)`);
-        }
-        log(`✓ Route ${i+1} succeeded: ${(arrayBuf.byteLength/1024).toFixed(1)} KB`, 'ok');
+        log('Route ' + (i+1) + '/' + routes.length + ': ' + routes[i].name, 'info');
+        if (gs) gs.textContent = '⬇ Route ' + (i+1) + ': ' + routes[i].name + '...';
+        buf = await routes[i].get();
+        if (buf.byteLength < 10240) throw new Error('Too small (' + buf.byteLength + ' bytes) — not firmware');
+        log('✓ Route ' + (i+1) + ' OK — ' + (buf.byteLength/1024).toFixed(1) + ' KB', 'ok');
         break;
-      } catch (err) {
-        lastErr = err;
-        log(`✗ Route ${i+1} failed: ${err.message}`, 'warn');
-        arrayBuf = null;
+      } catch(e) {
+        log('✗ Route ' + (i+1) + ' failed: ' + e.message, 'warn');
+        lastErr = e; buf = null;
       }
     }
+    if (!buf) throw new Error('All download routes failed. Last: ' + (lastErr ? lastErr.message : '?'));
 
-    if (!arrayBuf) {
-      throw new Error(`All ${strategies.length} download routes failed. Last error: ${lastErr ? lastErr.message : 'unknown'}`);
-    }
-
-    // ── Step 3: load into esptool-js firmware buffer ──
-    const u8 = new Uint8Array(arrayBuf);
-    firmwareData = u8.reduce((acc, b) => acc + String.fromCharCode(b), '');
+    // Step 3: load into esptool buffer
+    var u8 = new Uint8Array(buf);
+    firmwareData = u8.reduce(function(acc, b) { return acc + String.fromCharCode(b); }, '');
     firmwareSize = u8.length;
 
-    if ($fwNm) $fwNm.textContent = `✅  ${GITHUB_ASSET}  from ${tag}  (${(firmwareSize/1024).toFixed(1)} KB)`;
+    var fn = $fwName();
+    if (fn) fn.textContent = '✅  ' + GITHUB_ASSET + '  from ' + tag + '  (' + (firmwareSize/1024).toFixed(1) + ' KB)';
+    if (gs) { gs.style.color = 'var(--green)'; gs.textContent = '✅ Ready — ' + tag + '  published ' + new Date(release.published_at).toLocaleDateString(); }
+    log('✅ Firmware ready: ' + (firmwareSize/1024).toFixed(1) + ' KB from ' + tag, 'ok');
 
-    $status.style.color = 'var(--green)';
-    $status.textContent = `✅ Ready — ${tag}  published ${new Date(release.published_at).toLocaleDateString()}`;
-    log(`✅ Firmware ready: ${(firmwareSize/1024).toFixed(1)} KB from release ${tag}`, 'ok');
+    var fwf = $fwFoot(); if (fwf) fwf.textContent = tag;
+    if (espLoader) { var bf = $btnFlash(); if (bf) bf.disabled = false; }
+    else log('Now click Connect, then Flash.', 'info');
 
-    if (typeof espLoader !== 'undefined' && espLoader) {
-      const fb = document.getElementById('btn-flash');
-      if (fb) fb.disabled = false;
-    } else {
-      log('Now click "Connect" to link to the XIAO ESP32-S3, then "Flash".', 'info');
-    }
-
-  } catch (err) {
-    $status.style.color = 'var(--red)';
-    $status.textContent = `❌ ${err.message}`;
-    log(`❌ Download failed completely: ${err.message}`, 'error');
-    log('Fallback: manually download firmware.bin from GitHub Releases and use the file picker below.', 'warn');
-    console.error('downloadFromGitHub error:', err);
+  } catch(err) {
+    if (gs) { gs.style.color = 'var(--red)'; gs.textContent = '❌ ' + err.message; }
+    log('❌ Download failed: ' + err.message, 'error');
+    log('Use the file picker below as fallback.', 'warn');
+    console.error(err);
   }
-
-  $btn.disabled = false;
+  if (btn) btn.disabled = false;
 }
 
-// ── Init ──────────────────────────────────────────────────
-window.addEventListener('load', () => {
-  if (!('serial' in navigator)) {
-    setStatus('⚠  Web Serial not available — use Chrome/Edge 89+', 'dot-error');
-    $btnConnect.disabled = true;
-    log('Web Serial API not available in this browser.', 'error');
-    log('Please use Google Chrome or Microsoft Edge version 89 or newer.', 'warn');
-  } else {
-    log('Web Serial API detected ✅', 'ok');
-    log('Select firmware.bin or download from GitHub, then click Connect.', 'info');
+// ── esptool terminal interface ───────────────────────────────────
+var termInterface = {
+  clean: function() {},
+  writeLine: function(d) { log(d, 'data'); },
+  write:     function(d) { log(d, 'data'); }
+};
+
+// ── Connect ─────────────────────────────────────────────────────
+async function handleConnect() {
+  if (espLoader) { await handleDisconnect(); return; }
+  if (typeof Transport === 'undefined' || typeof ESPLoader === 'undefined') {
+    setStatus('esptool-js not ready — reload the page', 'dot-error');
+    log('❌ esptool-js bundle not loaded. Hard-reload (Ctrl+Shift+R).', 'error');
+    return;
   }
-  // ─── Auto-discover latest release on page load ───
-  (async () => {
-    const $ghStatus = document.getElementById('gh-status');
-    const $fwFoot   = document.getElementById('fw');
+  if (!('serial' in navigator)) {
+    setStatus('Web Serial not supported — use Chrome/Edge 89+', 'dot-error');
+    log('❌ Web Serial API unavailable.', 'error');
+    return;
+  }
+  try {
+    setStatus('Requesting serial port...', 'dot-busy');
+    port = await navigator.serial.requestPort();
+    log('Connecting at ' + selectedBaud + ' baud...', 'info');
+    transport = new Transport(port, true);
+    espLoader = new ESPLoader({ transport: transport, baudrate: selectedBaud, romBaudrate: 115200, terminal: termInterface, enableTracing: false, debugLogging: false });
+    var chip = await espLoader.main();
+    var flashSize = await espLoader.getFlashSize();
+    var ci = $chipInfo(); if (ci) ci.style.display = 'block';
+    var ct = $chipText(); if (ct) ct.textContent = chip + '  |  Flash: ' + flashSize + ' KB';
+    var bc = $btnConnect(); if (bc) { bc.textContent = '⚡ Connected'; bc.disabled = true; }
+    var br = $btnReset(); if (br) br.disabled = false;
+    setStatus('Connected — ' + chip, 'dot-ok');
+    log('✅ Connected to ' + chip + '  Flash: ' + flashSize + ' KB', 'ok');
+    if (firmwareData) { var bf = $btnFlash(); if (bf) bf.disabled = false; }
+    else log('ℹ Download or select firmware, then Flash.', 'info');
+  } catch(err) {
+    espLoader = null; transport = null; port = null;
+    setStatus('Connection failed: ' + (err.message || err), 'dot-error');
+    log('❌ ' + (err.message || err), 'error');
+    log('Tip: hold BOOT → press RESET → release BOOT to enter bootloader.', 'warn');
+  }
+}
 
-    if ($ghStatus) {
-      $ghStatus.style.color = 'var(--muted)';
-      $ghStatus.textContent = 'Checking GitHub for latest release...';
-    }
+// ── Disconnect ──────────────────────────────────────────────────
+async function handleDisconnect() {
+  try { if (transport) await transport.disconnect(); } catch(e) {}
+  espLoader = null; transport = null; port = null;
+  var bc = $btnConnect(); if (bc) { bc.innerHTML = '<span>⚡</span> Connect'; bc.disabled = false; }
+  var br = $btnReset(); if (br) br.disabled = true;
+  var bf = $btnFlash(); if (bf) bf.disabled = true;
+  var ci = $chipInfo(); if (ci) ci.style.display = 'none';
+  setStatus('Disconnected', 'dot-idle');
+  log('Disconnected', 'warn');
+}
 
+// ── Flash ───────────────────────────────────────────────────────
+async function handleFlash() {
+  if (!espLoader || !firmwareData || isFlashing) return;
+  isFlashing = true;
+  var offset = parseInt(document.getElementById('flash-offset').value, 16) || 0;
+  var bf = $btnFlash(); if (bf) bf.disabled = true;
+  var bc = $btnConnect(); if (bc) bc.disabled = true;
+  var fi = document.getElementById('flash-icon'); if (fi) fi.textContent = '⏳';
+  var fl = document.getElementById('flash-label'); if (fl) fl.textContent = 'Flashing...';
+  setStatus('Erasing flash...', 'dot-busy', true);
+  setProgress(0, 'Erasing...', '0%');
+  log('Flash offset: 0x' + offset.toString(16).toUpperCase() + '  Size: ' + (firmwareSize/1024).toFixed(1) + ' KB', 'data');
+  try {
+    await espLoader.write_flash({
+      fileArray: [{ data: firmwareData, address: offset }],
+      flashSize: 'keep', flashMode: 'keep', flashFreq: 'keep',
+      eraseAll: false, compress: true,
+      reportProgress: function(idx, written, total) {
+        var pct = Math.round(written/total*100);
+        setProgress(pct, 'Writing ' + (written/1024).toFixed(0) + '/' + (total/1024).toFixed(0) + ' KB', pct + '%');
+        setStatus('Flashing... ' + pct + '%', 'dot-busy', true);
+      }
+    });
+    setStatus('Resetting device...', 'dot-busy', true);
+    setProgress(100, 'Verifying & resetting...', '100%');
+    await espLoader.after_flash('hard_reset');
+    setStatus('✅ Flash complete! Device rebooting.', 'dot-ok');
+    setProgress(100, 'Done!', '100%');
+    if (fi) fi.textContent = '✅';
+    if (fl) fl.textContent = 'Flash Complete';
+    log('✅ Firmware flashed successfully!', 'ok');
+    log('Connect to "ClaudeTokenMeter" WiFi to configure.', 'ok');
+    document.getElementById('success-banner').classList.add('show');
+    await handleDisconnect();
+  } catch(err) {
+    setStatus('Flash error: ' + (err.message || err), 'dot-error');
+    log('❌ Flash failed: ' + (err.message || err), 'error');
+    if (fi) fi.textContent = '🚀';
+    if (fl) fl.textContent = 'Retry Flash';
+    if (bf) bf.disabled = false;
+  }
+  isFlashing = false;
+  var bc2 = $btnConnect(); if (bc2) bc2.disabled = false;
+}
+
+// ── Init ────────────────────────────────────────────────────────
+window.addEventListener('load', function() {
+  if (!('serial' in navigator)) {
+    setStatus('⚠ Web Serial not available — use Chrome/Edge 89+', 'dot-error');
+    var bc = $btnConnect(); if (bc) bc.disabled = true;
+    log('Web Serial API not available. Use Chrome or Edge v89+.', 'error');
+  } else {
+    log('Web Serial API ready ✅', 'ok');
+    log('Download firmware or select a local file, then Connect.', 'info');
+  }
+
+  // Auto-show latest release info
+  (async function() {
+    var gs = $ghStatus();
     try {
-      const r = await fetch(
-        `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
+      var r = await fetch(
+        'https://api.github.com/repos/' + GITHUB_REPO + '/releases/latest',
         { headers: { 'Accept': 'application/vnd.github+json' }, cache: 'no-cache' }
       );
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const d = await r.json();
-
-      if ($fwFoot && d.tag_name) $fwFoot.textContent = d.tag_name;
-
-      // Update the release-tag span inside the button
-      const tagEl = document.getElementById('release-tag');
-      if (tagEl && d.tag_name) tagEl.textContent = d.tag_name;
-
-      if ($ghStatus) {
-        const date = new Date(d.published_at).toLocaleDateString();
-        const asset = (d.assets || []).find(a => a.name === GITHUB_ASSET);
-        const sizeKB = asset ? (asset.size / 1024).toFixed(1) + ' KB' : '';
-        $ghStatus.style.color = 'var(--muted)';
-        $ghStatus.textContent = `Latest: ${d.tag_name} ${sizeKB ? '(' + sizeKB + ')' : ''} — ${date}`;
-      }
-    } catch (e) {
-      if ($ghStatus) {
-        $ghStatus.style.color = 'var(--yellow)';
-        $ghStatus.textContent = `⚠ Could not auto-check latest release (${e.message}). Click button to retry.`;
-      }
-      console.warn('Release auto-discovery failed:', e);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      var d = await r.json();
+      var asset = (d.assets || []).find(function(a) { return a.name === GITHUB_ASSET; });
+      var sizeStr = asset ? ' (' + (asset.size/1024).toFixed(1) + ' KB)' : '';
+      var dateStr = new Date(d.published_at).toLocaleDateString();
+      if (gs) { gs.style.color = 'var(--muted)'; gs.textContent = 'Latest: ' + d.tag_name + sizeStr + ' — ' + dateStr; }
+      var fw = $fwFoot(); if (fw && d.tag_name) fw.textContent = d.tag_name;
+    } catch(e) {
+      if (gs) { gs.style.color = 'var(--yellow)'; gs.textContent = '⚠ Could not reach GitHub API: ' + e.message; }
     }
   })();
 });
