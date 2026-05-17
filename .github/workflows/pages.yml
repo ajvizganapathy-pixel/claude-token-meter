@@ -24,6 +24,23 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Download latest firmware for same-origin serving
+        run: |
+          RELEASE=$(curl -sf "https://api.github.com/repos/${{ github.repository }}/releases/latest" || echo '{}')
+          FW_URL=$(echo "$RELEASE" | python3 -c "
+          import sys, json
+          r = json.load(sys.stdin)
+          a = next((x for x in r.get('assets', []) if x['name'] == 'firmware.bin'), None)
+          print(a['browser_download_url'] if a else '')
+          " 2>/dev/null || echo '')
+          if [ -n "$FW_URL" ]; then
+            curl -sL "$FW_URL" -o firmware.bin
+            echo "Downloaded firmware.bin: $(wc -c < firmware.bin) bytes"
+          else
+            echo "No firmware.bin in latest release yet — skipping"
+          fi
+        continue-on-error: true
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 

@@ -999,6 +999,14 @@ async function downloadFromGitHub() {
     // octet-stream) is the officially-documented CORS-safe path.
     const strategies = [
       {
+        name: 'Same-origin (GitHub Pages)',
+        fn: async () => {
+          const r = await fetch('./firmware.bin', { cache: 'no-cache' });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.arrayBuffer();
+        }
+      },
+      {
         name: 'GitHub API asset endpoint',
         fn: async () => {
           const url = `https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${asset.id}`;
