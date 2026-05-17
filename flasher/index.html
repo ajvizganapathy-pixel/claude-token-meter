@@ -4,7 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Claude Token Meter — Web Flasher</title>
-<script src="https://unpkg.com/esptool-js@0.4.3/bundle.js"></script>
+<!-- crypto-js for MD5 verification (required by esptool-js@0.4.6 calculateMD5Hash hook) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+<script type="module">
+  // Use the BUNDLED build (same one esclabs / jobitjoseph use successfully).
+  // The esm.sh version was breaking the port handshake on first connect.
+  import { ESPLoader, Transport } from 'https://unpkg.com/esptool-js@0.4.6/bundle.js';
+  window.ESPLoader = ESPLoader;
+  window.Transport = Transport;
+  window.dispatchEvent(new Event('esptool-ready'));
+</script>
 <style>
 /* ── Fonts ─────────────────────────────────── */
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Syne:wght@400;600;700;800&display=swap');
@@ -602,7 +611,7 @@ footer a:hover { color: var(--purple2); }
       <button onclick="clearLog()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-family:var(--mono);font-size:11px">clear</button>
     </div>
     <div class="terminal" id="terminal">
-      <span class="log-info">Claude Token Meter Web Flasher  v1.0.0</span><br>
+      <span class="log-info">Claude Token Meter Web Flasher  v1.2.0  (esptool-js 0.4.6)</span><br>
       <span class="log-info">────────────────────────────────────</span><br>
       <span class="log-info">Waiting for connection...</span><br>
       <span class="log-cursor"></span>
@@ -787,12 +796,30 @@ const termInterface = {
   write(data)     { log(data, 'data'); },
 };
 
-// ── Connect ───────────────────────────────────────────────
+// ── Wait for esptool-js module ────────────────────────────
+async function ensureEsptoolLoaded() {
+  if (typeof Transport !== 'undefined' && typeof ESPLoader !== 'undefined') return true;
+  setStatus('Loading esptool-js...', 'dot-busy');
+  log('Waiting for esptool-js module to finish loading...', 'info');
+  await new Promise(resolve => {
+    let done = false;
+    const finish = () => { if (!done) { done = true; resolve(); } };
+    window.addEventListener('esptool-ready', finish, { once: true });
+    const t0 = Date.now();
+    const iv = setInterval(() => {
+      if (typeof Transport !== 'undefined' && typeof ESPLoader !== 'undefined') { clearInterval(iv); finish(); }
+      else if (Date.now() - t0 > 15000) { clearInterval(iv); finish(); }
+    }, 100);
+  });
+  return (typeof Transport !== 'undefined' && typeof ESPLoader !== 'undefined');
+}
+
+// ── Connect (just select the port — don't open it yet) ────
+// This mirrors the working esclabs / jobitjoseph flasher: requestPort()
+// gives us a SerialPort handle; we only open the port (via Transport) at
+// flash/erase time so the baud rate is correct and no double-open occurs.
 async function handleConnect() {
-  if (espLoader) {
-    await handleDisconnect();
-    return;
-  }
+  if (port) { await handleDisconnect(); return; }
 
   if (!('serial' in navigator)) {
     log('❌ Web Serial API not supported. Use Chrome or Edge 89+.', 'error');
@@ -800,53 +827,59 @@ async function handleConnect() {
     return;
   }
 
+  if (!(await ensureEsptoolLoaded())) {
+    setStatus('esptool-js failed to load — check network', 'dot-error');
+    log('❌ esptool-js module did not load (network or CDN issue).', 'error');
+    return;
+  }
+
   try {
     setStatus('Requesting serial port...', 'dot-busy');
-    log('Requesting serial port access...', 'info');
+    log('Requesting serial port access — pick your COM port in the dialog...', 'info');
 
     port = await navigator.serial.requestPort();
 
-    log(`Connecting at ${selectedBaud} baud...`, 'info');
-    setStatus(`Connecting at ${selectedBaud} baud...`, 'dot-busy');
+    const info = port.getInfo ? port.getInfo() : {};
+    const vidpid = (info.usbVendorId != null)
+      ? `VID:${info.usbVendorId.toString(16).padStart(4,'0')} PID:${(info.usbProductId||0).toString(16).padStart(4,'0')}`
+      : 'serial port';
 
-    transport = new Transport(port, true);
-    espLoader = new ESPLoader({
-      transport,
-      baudrate:      selectedBaud,
-      romBaudrate:   115200,
-      terminal:      termInterface,
-      enableTracing: false,
-      debugLogging:  false,
+    $chipInfo.style.display = 'block';
+    $chipText.textContent   = `Port selected (${vidpid}) — chip detected on flash`;
+    $btnConnect.innerHTML   = '<span>⚡</span> Port Selected';
+    $btnConnect.disabled    = true;
+    $btnReset.disabled      = false;
+
+    setStatus('Port selected — ready to flash', 'dot-ok');
+    log(`✅  Serial port selected (${vidpid}).`, 'ok');
+    log('Chip detection runs when you click Flash (so the correct baud is used).', 'info');
+
+    port.addEventListener('disconnect', () => {
+      log('Device disconnected from USB.', 'warn');
+      handleDisconnect();
     });
 
-    const chip = await espLoader.main();
-
-    // Connected!
-    const flashSize = await espLoader.getFlashSize();
-    $chipInfo.style.display  = 'block';
-    $chipText.textContent    = `${chip}  |  Flash: ${flashSize} KB`;
-    $btnConnect.textContent  = '⚡ Connected';
-    $btnConnect.disabled     = true;
-    $btnReset.disabled       = false;
-
-    setStatus(`Connected — ${chip}`, 'dot-ok');
-    log(`✅  Connected to ${chip}  Flash: ${flashSize} KB`, 'ok');
-
     if (firmwareData) $btnFlash.disabled = false;
-    else log('ℹ  Now select a firmware.bin file above', 'info');
+    else log('ℹ  Now select a firmware.bin file or download from GitHub.', 'info');
 
   } catch (err) {
-    espLoader = null; transport = null; port = null;
-    setStatus(`Connection failed: ${err.message || err}`, 'dot-error');
-    log(`❌  ${err.message || err}`, 'error');
-    log('Tip: Enter bootloader mode (hold BOOT → press RESET → release BOOT)', 'warn');
+    port = null;
+    if (err && err.name === 'NotFoundError') {
+      setStatus('Port selection cancelled', 'dot-idle');
+      log('Port selection cancelled.', 'warn');
+    } else {
+      setStatus(`Connection failed: ${err.message || err}`, 'dot-error');
+      log(`❌  ${err.message || err}`, 'error');
+      log('Tip: Enter bootloader mode (hold BOOT → press RESET → release BOOT) and retry.', 'warn');
+    }
   }
 }
 
 // ── Disconnect ────────────────────────────────────────────
 async function handleDisconnect() {
   try {
-    if (transport) await transport.disconnect();
+    if (transport) { try { await transport.disconnect(); } catch (_) {} transport = null; }
+    if (port && port.readable) { try { await port.close(); } catch (_) {} }
   } catch (_) {}
   espLoader = null; transport = null; port = null;
   $btnConnect.innerHTML  = '<span>⚡</span> Connect';
@@ -860,23 +893,48 @@ async function handleDisconnect() {
 
 // ── Flash ─────────────────────────────────────────────────
 async function handleFlash() {
-  if (!espLoader || !firmwareData || isFlashing) return;
+  if (!port || !firmwareData || isFlashing) return;
   isFlashing = true;
 
   const offset = parseInt(document.getElementById('flash-offset').value, 16) || 0x0;
 
   $btnFlash.disabled      = true;
   $btnConnect.disabled    = true;
+  $btnReset.disabled      = true;
   $flashIcon.textContent  = '⏳';
-  $flashLabel.textContent = 'Flashing...';
-  setStatus('Erasing flash...', 'dot-busy', true);
-  setProgress(0, 'Erasing...', '0%');
+  $flashLabel.textContent = 'Connecting...';
+  setStatus('Opening port & detecting chip...', 'dot-busy', true);
+  setProgress(0, 'Connecting...', '0%');
 
   log(`Flash offset: 0x${offset.toString(16).toUpperCase()}  Size: ${(firmwareSize/1024).toFixed(1)} KB`, 'data');
-  log('Starting flash...', 'info');
 
   try {
-    await espLoader.write_flash({
+    // If the port happens to be open from a prior attempt, close it so Transport can open it cleanly.
+    if (port.readable) {
+      log('  Closing prior port handle...', 'info');
+      try { await port.close(); } catch (_) {}
+    }
+
+    transport = new Transport(port, true);
+    espLoader = new ESPLoader({
+      transport,
+      baudrate:      selectedBaud,
+      romBaudrate:   115200,
+      terminal:      termInterface,
+      enableTracing: false,
+      debugLogging:  false,
+    });
+
+    log(`Connecting at ${selectedBaud} baud...`, 'info');
+    const chip = await espLoader.main();
+    log(`✅  Chip detected: ${chip}`, 'ok');
+    $chipText.textContent = `Chip: ${chip}  •  flashing...`;
+
+    $flashLabel.textContent = 'Flashing...';
+    setStatus('Writing firmware...', 'dot-busy', true);
+    setProgress(0, 'Writing...', '0%');
+
+    await espLoader.writeFlash({
       fileArray:   [{ data: firmwareData, address: offset }],
       flashSize:   'keep',
       flashMode:   'keep',
@@ -889,14 +947,21 @@ async function handleFlash() {
         const tKB = (total  / 1024).toFixed(0);
         setProgress(pct, `Writing ${wKB} / ${tKB} KB`, `${pct}%`);
         setStatus(`Flashing... ${pct}%`, 'dot-busy', true);
-      }
+      },
+      calculateMD5Hash: (image) => {
+        // esptool-js@0.4.6 passes a binary string — Latin1 preserves byte values.
+        const wordArray = (typeof image === 'string')
+          ? CryptoJS.enc.Latin1.parse(image)
+          : CryptoJS.lib.WordArray.create(image);
+        return CryptoJS.MD5(wordArray).toString();
+      },
     });
 
-    // Hard reset
     setStatus('Resetting device...', 'dot-busy', true);
     setProgress(100, 'Verifying & resetting...', '100%');
-    log('Verifying flash...', 'info');
-    await espLoader.after_flash('hard_reset');
+    log('Verifying flash & hard-resetting...', 'info');
+    try { await espLoader.hardReset(); }
+    catch (_) { try { await espLoader.after_flash('hard_reset'); } catch (_) {} }
 
     setStatus('✅  Flash complete! Device is rebooting.', 'dot-ok');
     setProgress(100, 'Done!', '100%');
@@ -912,13 +977,18 @@ async function handleFlash() {
   } catch (err) {
     setStatus(`Flash error: ${err.message || err}`, 'dot-error');
     log(`❌  Flash failed: ${err.message || err}`, 'error');
+    log('Tip: Re-enter bootloader mode (hold BOOT → tap RESET → release BOOT), then click Flash again.', 'warn');
     $flashIcon.textContent  = '🚀';
     $flashLabel.textContent = 'Retry Flash';
     $btnFlash.disabled      = false;
+    $btnReset.disabled      = false;
+    // Tear down loader/transport so a retry can re-open the port.
+    try { if (transport) await transport.disconnect(); } catch (_) {}
+    transport = null; espLoader = null;
   }
 
   isFlashing = false;
-  $btnConnect.disabled = false;
+  $btnConnect.disabled = !!port; // stay disabled if port is still selected
 }
 
 // ── GitHub Releases ───────────────────────────────────────
