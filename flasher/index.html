@@ -786,7 +786,7 @@ $fwFile.addEventListener('change', async (e) => {
   $fwName.textContent = `✅  ${file.name}  (${(firmwareSize/1024).toFixed(1)} KB)`;
   log(`Firmware loaded: ${file.name}  (${(firmwareSize/1024).toFixed(1)} KB)`, 'ok');
 
-  if (espLoader) $btnFlash.disabled = false;
+  if (port) $btnFlash.disabled = false;
 });
 
 // ── esptool-js terminal interface ─────────────────────────
@@ -1038,7 +1038,7 @@ async function downloadFromGitHub() {
     $fwName.textContent = `✅  firmware.bin  (${(firmwareSize/1024).toFixed(1)} KB)  [${latestRelease.tag_name}]`;
     $fwName.style.color = 'var(--green)';
     log(`Firmware downloaded: ${(firmwareSize/1024).toFixed(1)} KB`, 'ok');
-    if (espLoader) $btnFlash.disabled = false;
+    if (port) $btnFlash.disabled = false;
     else log('Firmware ready. Click Connect to flash.', 'info');
   } catch (err) {
     log(`Download failed: ${err.message}`, 'error');
