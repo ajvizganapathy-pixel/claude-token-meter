@@ -269,33 +269,28 @@ async function downloadFirmware() {
   var btn = document.getElementById('btn-gh');
   var gs  = document.getElementById('gh-status');
   if (btn) btn.disabled = true;
-  if (gs)  { gs.style.color='var(--muted)'; gs.textContent='🔍 Fetching release info…'; }
+  if (gs)  { gs.style.color='var(--muted)'; gs.textContent='📋 Loading manifest…'; }
   log('──────────────────────────────', 'i');
-  log('Querying GitHub API for latest release…', 'i');
+  log('Loading manifest.json (same-origin)…', 'i');
   try {
-    var ar = await fetch('https://api.github.com/repos/'+REPO+'/releases/latest',
-      {headers:{'Accept':'application/vnd.github+json'},cache:'no-cache'});
-    if (!ar.ok) throw new Error('GitHub API: HTTP '+ar.status);
-    var rel = await ar.json();
-    var tag = rel.tag_name;
-    if (!tag) throw new Error('No tag_name in API response');
-    log('Latest release: '+tag, 'd');
-    if (gs) gs.textContent = '📋 Loading manifest for '+tag+'…';
-
-    var murl = 'https://github.com/'+REPO+'/releases/download/'+tag+'/'+MANIFEST;
-    log('Manifest URL: '+murl, 'i');
+    // Manifest + firmware are served from GitHub Pages (same origin) to avoid
+    // the CORS block on github.com/releases/download → release-assets.githubusercontent.com
+    var murl = MANIFEST;
     var mr = await fetch(murl, {cache:'no-cache'});
-    if (!mr.ok) throw new Error('manifest.json not in release '+tag+' (HTTP '+mr.status+')');
+    if (!mr.ok) throw new Error('manifest.json HTTP '+mr.status);
     var mf = await mr.json();
-    log('Manifest: '+mf.name+' '+mf.version, 'o');
+    var tag = mf.version || 'unknown';
+    log('Manifest: '+mf.name+' '+tag, 'o');
+    if (gs) gs.textContent = '⬇ Downloading firmware '+tag+'…';
 
     var builds = mf.builds||[];
     if (!builds.length) throw new Error('manifest.json has no builds array');
     var parts = builds[0].parts||[];
     if (!parts.length) throw new Error('manifest.json builds[0] has no parts');
-    var fwurl = parts[0].path;
+    // Resolve firmware path relative to manifest URL — works for both relative
+    // ("firmware.bin") and absolute URLs in the manifest.
+    var fwurl = new URL(parts[0].path, new URL(murl, window.location.href)).href;
     log('Firmware URL: '+fwurl, 'd');
-    if (gs) gs.textContent = '⬇ Downloading firmware '+tag+'…';
 
     var fr = await fetch(fwurl, {cache:'no-cache'});
     if (!fr.ok) throw new Error('Firmware fetch: HTTP '+fr.status);
