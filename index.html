@@ -336,109 +336,78 @@ document.addEventListener('DOMContentLoaded', function() {
   }
 });
 
-// ── GitHub Download (multi-strategy CORS-safe) ──────────────────
+// ── GitHub Download (manifest.json — CORS-safe) ──────────────────
 async function downloadFromGitHub() {
   var btn = document.getElementById('btn-gh');
-  var gs  = $ghStatus();
+  var gs  = document.getElementById('gh-status');
   if (btn) btn.disabled = true;
-  if (gs) { gs.style.color = 'var(--muted)'; gs.textContent = '🔍 Querying GitHub API...'; }
+  if (gs)  { gs.style.color = 'var(--muted)'; gs.textContent = '🔍 Fetching release info...'; }
   log('─────────────────────────────────────', 'info');
-  log('Fetching release info from GitHub...', 'info');
+  log('Fetching latest release from GitHub...', 'info');
 
   try {
-    // Step 1: release metadata — api.github.com always has CORS *
+    // Step 1: get latest tag from GitHub API (api.github.com has CORS *)
     var apiRes = await fetch(
-      'https://api.github.com/repos/' + GITHUB_REPO + '/releases/latest',
+      'https://api.github.com/repos/ajvizganapathy-pixel/claude-token-meter/releases/latest',
       { headers: { 'Accept': 'application/vnd.github+json' }, cache: 'no-cache' }
     );
-    if (!apiRes.ok) throw new Error('GitHub API returned HTTP ' + apiRes.status);
+    if (!apiRes.ok) throw new Error('GitHub API HTTP ' + apiRes.status);
     var release = await apiRes.json();
-    var tag     = release.tag_name;
-    if (!tag) throw new Error('No tag_name in release response');
+    var tag = release.tag_name;
+    if (!tag) throw new Error('No tag_name in release');
+    log('Release tag: ' + tag, 'data');
 
-    var asset = (release.assets || []).find(function(a) { return a.name === GITHUB_ASSET; });
-    if (!asset) {
-      var names = (release.assets || []).map(function(a) { return a.name; }).join(', ');
-      throw new Error('No ' + GITHUB_ASSET + ' in release ' + tag + '. Assets found: ' + (names || 'none'));
-    }
-    log('Release ' + tag + ' — ' + GITHUB_ASSET + ' (' + (asset.size/1024).toFixed(1) + ' KB)', 'data');
-    if (gs) gs.textContent = '⬇ Downloading ' + tag + ' (' + (asset.size/1024).toFixed(1) + ' KB)...';
+    // Step 2: fetch manifest.json from the release (direct URL, no CORS issues)
+    var manifestUrl = 'https://github.com/ajvizganapathy-pixel/claude-token-meter/releases/download/' + tag + '/manifest.json';
+    log('Fetching manifest: ' + manifestUrl, 'info');
+    if (gs) gs.textContent = '📋 Loading manifest for ' + tag + '...';
 
-    // Step 2: try download routes in order
-    var routes = [
-      {
-        name: 'api.github.com asset endpoint (CORS-safe)',
-        get: async function() {
-          var r = await fetch(
-            'https://api.github.com/repos/' + GITHUB_REPO + '/releases/assets/' + asset.id,
-            { headers: { 'Accept': 'application/octet-stream' }, cache: 'no-cache' }
-          );
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          return r.arrayBuffer();
-        }
-      },
-      {
-        name: 'direct browser_download_url',
-        get: async function() {
-          var r = await fetch(asset.browser_download_url, { cache: 'no-cache' });
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          return r.arrayBuffer();
-        }
-      },
-      {
-        name: 'corsproxy.io',
-        get: async function() {
-          var r = await fetch('https://corsproxy.io/?' + encodeURIComponent(asset.browser_download_url), { cache: 'no-cache' });
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          return r.arrayBuffer();
-        }
-      },
-      {
-        name: 'allorigins.win',
-        get: async function() {
-          var r = await fetch('https://api.allorigins.win/raw?url=' + encodeURIComponent(asset.browser_download_url), { cache: 'no-cache' });
-          if (!r.ok) throw new Error('HTTP ' + r.status);
-          return r.arrayBuffer();
-        }
-      }
-    ];
+    var mRes = await fetch(manifestUrl, { cache: 'no-cache' });
+    if (!mRes.ok) throw new Error('manifest.json not found in release ' + tag + ' (HTTP ' + mRes.status + ')');
+    var manifest = await mRes.json();
+    log('Manifest loaded: ' + manifest.name + ' ' + manifest.version, 'ok');
 
-    var buf = null, lastErr = null;
-    for (var i = 0; i < routes.length; i++) {
-      try {
-        log('Route ' + (i+1) + '/' + routes.length + ': ' + routes[i].name, 'info');
-        if (gs) gs.textContent = '⬇ Route ' + (i+1) + ': ' + routes[i].name + '...';
-        buf = await routes[i].get();
-        if (buf.byteLength < 10240) throw new Error('Too small (' + buf.byteLength + ' bytes) — not firmware');
-        log('✓ Route ' + (i+1) + ' OK — ' + (buf.byteLength/1024).toFixed(1) + ' KB', 'ok');
-        break;
-      } catch(e) {
-        log('✗ Route ' + (i+1) + ' failed: ' + e.message, 'warn');
-        lastErr = e; buf = null;
-      }
-    }
-    if (!buf) throw new Error('All download routes failed. Last: ' + (lastErr ? lastErr.message : '?'));
+    // Step 3: get firmware URL from manifest
+    var builds = manifest.builds || [];
+    if (!builds.length) throw new Error('No builds in manifest.json');
+    var parts = builds[0].parts || [];
+    if (!parts.length) throw new Error('No parts in manifest builds[0]');
+    var fwUrl = parts[0].path;
+    log('Firmware URL: ' + fwUrl, 'data');
 
-    // Step 3: load into esptool buffer
+    // Step 4: download firmware binary directly
+    if (gs) gs.textContent = '⬇ Downloading firmware from ' + tag + '...';
+    var binRes = await fetch(fwUrl, { cache: 'no-cache' });
+    if (!binRes.ok) throw new Error('Firmware download HTTP ' + binRes.status);
+
+    var buf = await binRes.arrayBuffer();
+    if (buf.byteLength < 10240) throw new Error('Download too small (' + buf.byteLength + ' B) — not firmware');
+
+    // Step 5: load into esptool buffer
     var u8 = new Uint8Array(buf);
-    firmwareData = u8.reduce(function(acc, b) { return acc + String.fromCharCode(b); }, '');
+    firmwareData = u8.reduce(function(a, b) { return a + String.fromCharCode(b); }, '');
     firmwareSize = u8.length;
 
-    var fn = $fwName();
-    if (fn) fn.textContent = '✅  ' + GITHUB_ASSET + '  from ' + tag + '  (' + (firmwareSize/1024).toFixed(1) + ' KB)';
-    if (gs) { gs.style.color = 'var(--green)'; gs.textContent = '✅ Ready — ' + tag + '  published ' + new Date(release.published_at).toLocaleDateString(); }
-    log('✅ Firmware ready: ' + (firmwareSize/1024).toFixed(1) + ' KB from ' + tag, 'ok');
+    var fn = document.getElementById('fw-name');
+    if (fn) fn.textContent = '✅  firmware.bin  ' + tag + '  (' + (firmwareSize/1024).toFixed(1) + ' KB)';
+    if (gs) { gs.style.color = 'var(--green)'; gs.textContent = '✅ Ready — ' + tag + '  ' + (firmwareSize/1024).toFixed(1) + ' KB'; }
+    log('✅ Firmware ready: ' + (firmwareSize/1024).toFixed(1) + ' KB', 'ok');
+    log('Click Connect, select port, then Flash.', 'info');
 
-    var fwf = $fwFoot(); if (fwf) fwf.textContent = tag;
-    if (espLoader) { var bf = $btnFlash(); if (bf) bf.disabled = false; }
-    else log('Now click Connect, then Flash.', 'info');
+    var fw = document.getElementById('fw');
+    if (fw) fw.textContent = tag;
+    if (typeof espLoader !== 'undefined' && espLoader) {
+      var bf = document.getElementById('btn-flash');
+      if (bf) bf.disabled = false;
+    }
 
   } catch(err) {
     if (gs) { gs.style.color = 'var(--red)'; gs.textContent = '❌ ' + err.message; }
-    log('❌ Download failed: ' + err.message, 'error');
-    log('Use the file picker below as fallback.', 'warn');
+    log('❌ ' + err.message, 'error');
+    log('Fallback: use the file picker below.', 'warn');
     console.error(err);
   }
+
   if (btn) btn.disabled = false;
 }
 
@@ -554,23 +523,27 @@ window.addEventListener('load', function() {
     log('Download firmware or select a local file, then Connect.', 'info');
   }
 
-  // Auto-show latest release info
+  // Auto-show release tag on load
   (async function() {
-    var gs = $ghStatus();
+    var gs = document.getElementById('gh-status');
+    var fw = document.getElementById('fw');
     try {
       var r = await fetch(
-        'https://api.github.com/repos/' + GITHUB_REPO + '/releases/latest',
+        'https://api.github.com/repos/ajvizganapathy-pixel/claude-token-meter/releases/latest',
         { headers: { 'Accept': 'application/vnd.github+json' }, cache: 'no-cache' }
       );
       if (!r.ok) throw new Error('HTTP ' + r.status);
       var d = await r.json();
-      var asset = (d.assets || []).find(function(a) { return a.name === GITHUB_ASSET; });
-      var sizeStr = asset ? ' (' + (asset.size/1024).toFixed(1) + ' KB)' : '';
-      var dateStr = new Date(d.published_at).toLocaleDateString();
-      if (gs) { gs.style.color = 'var(--muted)'; gs.textContent = 'Latest: ' + d.tag_name + sizeStr + ' — ' + dateStr; }
-      var fw = $fwFoot(); if (fw && d.tag_name) fw.textContent = d.tag_name;
+      if (fw && d.tag_name) fw.textContent = d.tag_name;
+      if (gs) {
+        gs.style.color = 'var(--muted)';
+        gs.textContent = 'Latest: ' + d.tag_name + ' — click button to download';
+      }
     } catch(e) {
-      if (gs) { gs.style.color = 'var(--yellow)'; gs.textContent = '⚠ Could not reach GitHub API: ' + e.message; }
+      if (gs) {
+        gs.style.color = 'var(--yellow)';
+        gs.textContent = '⚠ ' + e.message + ' — click button to retry';
+      }
     }
   })();
 });
