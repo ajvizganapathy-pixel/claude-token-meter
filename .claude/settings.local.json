@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -m ' *)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\ANJAN GANAPATHY K\\\\Documents\\\\GitHub\\\\claude-token-meter\" -Recurse -Depth 2)",
+      "Bash(Select-Object FullName, PSIsContainer)",
+      "Bash(Get-ChildItem -Path \"C:\\\\Users\\\\ANJAN GANAPATHY K\\\\Documents\\\\GitHub\\\\claude-token-meter\" -Recurse -Force)",
+      "Bash(Select-Object FullName)",
+      "Bash(grep -E \"\\\\.\\(cpp|c|h|csv|ini|config|json\\)$|sdkconfig\")",
+      "Bash(git *)",
+      "Bash(where pio *)",
+      "Bash(where platformio *)",
+      "Bash('/c/Users/ANJAN GANAPATHY K/.platformio/penv/Scripts/pio.exe' --version)",
+      "Bash('/c/Users/ANJAN GANAPATHY K/.platformio/penv/Scripts/pio.exe' run -e xiao_esp32s3 -t clean)",
+      "Bash('/c/Users/ANJAN GANAPATHY K/.platformio/penv/Scripts/pio.exe' run -e xiao_esp32s3)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -L -s -o /dev/null -w 'HTTP %{http_code} size %{size_download} bytes\\\\n' https://github.com/ajvizganapathy-pixel/claude-token-meter/releases/download/v1.2.0/firmware.bin)",
+      "Bash(curl -L -s -o /dev/null -w 'HTTP %{http_code} size %{size_download} bytes\\\\n' https://github.com/ajvizganapathy-pixel/claude-token-meter/releases/download/v1.2.0/bootloader.bin)",
+      "Bash(curl -L -s -o /dev/null -w 'HTTP %{http_code} size %{size_download} bytes\\\\n' https://github.com/ajvizganapathy-pixel/claude-token-meter/releases/download/v1.2.0/partitions.bin)",
+      "Bash(echo \"Push exit code: $?\")",
+      "Bash(curl -s https://ajvizganapathy-pixel.github.io/claude-token-meter/)",
+      "Bash(gh api *)",
+      "Bash(curl -L -s -o /dev/null -w '%{http_code} %{size_download}' https://github.com/ajvizganapathy-pixel/claude-token-meter/releases/download/v1.2.0/__TRACKED_VAR__)",
+      "Bash(curl -L -s \"https://github.com/ajvizganapathy-pixel/claude-token-meter/releases/download/v1.2.0/manifest.json\")",
+      "Bash(dir \"C:\\\\Users\\\\ANJAN GANAPATHY K\\\\Documents\\\\GitHub\\\\claude-token-meter\")",
+      "Bash(curl *)"
+    ]
+  }
+}
