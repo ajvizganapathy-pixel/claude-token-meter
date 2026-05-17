@@ -4,7 +4,14 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Claude Token Meter — Web Flasher</title>
-<script src="https://unpkg.com/esptool-js@0.4.3/bundle.js"></script>
+<!-- crypto-js required by esptool-js@0.4.6 calculateMD5Hash -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+<script type="module">
+  import { ESPLoader, Transport } from 'https://unpkg.com/esptool-js@0.4.6/bundle.js';
+  window.ESPLoader = ESPLoader;
+  window.Transport = Transport;
+  window.dispatchEvent(new Event('esptool-ready'));
+</script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Syne:wght@400;700;800&display=swap');
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -149,7 +156,7 @@ footer a:hover{color:var(--purple2)}
       <button onclick="clearLog()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-family:var(--mono);font-size:11px">clear</button>
     </div>
     <div class="term" id="term">
-      <span class="li">Claude Token Meter Web Flasher  v1.2.0</span><br>
+      <span class="li">Claude Token Meter Web Flasher  v1.2.0  (esptool-js 0.4.6)</span><br>
       <span class="li">&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span><br>
       <span class="li">Full flash: bootloader + partitions + firmware (erases NVS)</span><br>
       <span class="lc"></span>
@@ -201,7 +208,6 @@ footer a:hover{color:var(--purple2)}
 
 <script>
 var REPO = 'ajvizganapathy-pixel/claude-token-meter';
-var MANIFEST_FILE = 'manifest.json';
 var espLoader = null, transport = null, port = null;
 var selectedBaud = 921600;
 var flashParts = [];
@@ -231,37 +237,51 @@ function setBaud(b) {
   document.querySelectorAll('.bb').forEach(function(btn){ btn.classList.toggle('active',parseInt(btn.textContent)===b); });
 }
 
+async function ensureEsptoolLoaded() {
+  if (typeof Transport !== 'undefined' && typeof ESPLoader !== 'undefined') return true;
+  setStatus('Loading esptool-js…', 'd-busy');
+  log('Waiting for esptool-js to load…', 'i');
+  await new Promise(function(resolve) {
+    var done = false;
+    var finish = function() { if (!done) { done = true; resolve(); } };
+    window.addEventListener('esptool-ready', finish, { once: true });
+    var t0 = Date.now();
+    var iv = setInterval(function() {
+      if (typeof Transport !== 'undefined' && typeof ESPLoader !== 'undefined') { clearInterval(iv); finish(); }
+      else if (Date.now() - t0 > 15000) { clearInterval(iv); finish(); }
+    }, 100);
+  });
+  return (typeof Transport !== 'undefined' && typeof ESPLoader !== 'undefined');
+}
+
+// Fetch manifest from same-origin (no CORS) then download binary parts same-origin.
 async function downloadFirmware() {
   var btn=document.getElementById('btn-gh');
   var gs=document.getElementById('gh-status');
   var pl=document.getElementById('parts-list');
   if(btn) btn.disabled=true;
-  if(gs){gs.style.color='var(--muted)';gs.textContent='Querying GitHub API...';}
+  if(gs){gs.style.color='var(--muted)';gs.textContent='Loading firmware manifest…';}
   log('----------------------------------------','i');
-  log('Fetching latest release from GitHub...','i');
+  log('Loading firmware manifest (same-origin)…','i');
   try {
-    var ar=await fetch('https://api.github.com/repos/'+REPO+'/releases/latest',{headers:{'Accept':'application/vnd.github+json'},cache:'no-cache'});
-    if(!ar.ok) throw new Error('GitHub API HTTP '+ar.status);
-    var rel=await ar.json();
-    var tag=rel.tag_name;
-    if(!tag) throw new Error('No tag_name in response');
-    log('Release: '+tag,'d');
-    if(gs) gs.textContent='Loading manifest for '+tag+'...';
-
-    var murl='https://github.com/'+REPO+'/releases/download/'+tag+'/'+MANIFEST_FILE;
-    log('Fetching manifest: '+murl,'i');
-    var mr=await fetch(murl,{cache:'no-cache'});
-    if(!mr.ok) throw new Error('manifest.json missing from release '+tag+' (HTTP '+mr.status+')');
+    // Fetch manifest from same origin — no CORS restriction.
+    var mr=await fetch('./manifest.json?_='+Date.now());
+    if(!mr.ok) throw new Error('manifest.json not found (HTTP '+mr.status+')');
     var mf=await mr.json();
-    log('Manifest: '+mf.name+' '+mf.version+' ('+mf.builds[0].parts.length+' parts)','o');
 
-    var builds=mf.builds||[];
-    if(!builds.length) throw new Error('No builds in manifest');
-    var parts=builds[0].parts||[];
-    if(!parts.length) throw new Error('No parts in manifest builds[0]');
+    // Display version from GitHub API (read-only, CORS safe).
+    var tag=mf.version||'v1.2.0';
+    try {
+      var ar=await fetch('https://api.github.com/repos/'+REPO+'/releases/latest',{headers:{'Accept':'application/vnd.github+json'},cache:'no-cache'});
+      if(ar.ok){var rel=await ar.json();if(rel.tag_name){tag=rel.tag_name;}}
+    }catch(e){}
 
-    if(gs) gs.textContent='Downloading '+parts.length+' firmware parts...';
+    log('Manifest: '+mf.name+' '+tag+' ('+mf.builds[0].parts.length+' parts)','o');
+    if(gs) gs.textContent='Downloading '+mf.builds[0].parts.length+' firmware parts…';
     if(pl) pl.style.display='block';
+
+    var parts=mf.builds[0].parts||[];
+    if(!parts.length) throw new Error('No parts in manifest');
 
     var prIds=['pr-boot','pr-part','pr-app'];
     flashParts=[];
@@ -272,11 +292,13 @@ async function downloadFirmware() {
       var fname=p.path.split('/').pop();
       var prEl=document.getElementById(prIds[i]||'pr-app');
       if(prEl){prEl.className='part-row part-wait';prEl.textContent='[..] '+fname+'  @0x'+p.offset.toString(16).toUpperCase();}
-      log('Downloading part '+(i+1)+'/'+parts.length+': '+fname+' @ 0x'+p.offset.toString(16),'i');
-      if(gs) gs.textContent='Part '+(i+1)+'/'+parts.length+': '+fname+'...';
+      log('Downloading '+(i+1)+'/'+parts.length+': '+fname+' @ 0x'+p.offset.toString(16),'i');
+      if(gs) gs.textContent='Part '+(i+1)+'/'+parts.length+': '+fname+'…';
 
-      var br=await fetch(p.path,{cache:'no-cache'});
-      if(!br.ok) throw new Error(fname+' download HTTP '+br.status);
+      // Use relative path from manifest — served same-origin, no CORS.
+      var url = p.path + '?_=' + Date.now();
+      var br=await fetch(url);
+      if(!br.ok) throw new Error(fname+' HTTP '+br.status);
       var buf=await br.arrayBuffer();
       if(buf.byteLength<100) throw new Error(fname+' too small ('+buf.byteLength+' B)');
 
@@ -289,14 +311,11 @@ async function downloadFirmware() {
       log('OK '+fname+': '+(buf.byteLength/1024).toFixed(1)+' KB','o');
     }
 
-    if(gs){gs.style.color='var(--green)';gs.textContent='All '+parts.length+' parts ready - '+(totalBytes/1024).toFixed(1)+' KB total  ('+tag+')';}
-    var fn=document.getElementById('fw-name');
-    if(!fn){var fn2=document.createElement('div');fn2.id='fw-name';gs.after(fn2);fn=fn2;}
-    fn.textContent='All parts loaded from '+tag;
-    log('All parts ready: '+(totalBytes/1024).toFixed(1)+' KB total','o');
-    log('Click Connect -> select port -> Flash All Parts','i');
+    if(gs){gs.style.color='var(--green)';gs.textContent='All '+parts.length+' parts ready — '+(totalBytes/1024).toFixed(1)+' KB total  ('+tag+')';}
     var fv=document.getElementById('fw-ver'); if(fv) fv.textContent=tag;
-    if(espLoader){var bf=document.getElementById('btn-fla');if(bf)bf.disabled=false;}
+    log('All parts ready: '+(totalBytes/1024).toFixed(1)+' KB total','o');
+    log('Click Connect → select port → Flash All Parts','i');
+    if(port){var bf=document.getElementById('btn-fla');if(bf)bf.disabled=false;}
   } catch(err) {
     if(gs){gs.style.color='var(--red)';gs.textContent='Error: '+err.message;}
     log('Error: '+err.message,'e');
@@ -307,37 +326,61 @@ async function downloadFirmware() {
 
 var ti={clean:function(){},writeLine:function(d){log(d,'d');},write:function(d){log(d,'d');}};
 
+// Phase 1: just claim the serial port. Transport/ESPLoader open only during flash.
 async function handleConnect() {
-  if(espLoader){await handleDisconnect();return;}
-  if(typeof Transport==='undefined'||typeof ESPLoader==='undefined'){
-    setStatus('esptool-js not ready - hard reload','d-err');log('esptool-js not loaded.','e');return;
+  if(port){await handleDisconnect();return;}
+
+  if(!('serial' in navigator)){
+    setStatus('Web Serial not supported — use Chrome/Edge 89+','d-err');
+    log('Web Serial API not available.','e'); return;
   }
-  if(!('serial' in navigator)){setStatus('Web Serial not supported','d-err');log('Need Chrome/Edge 89+','e');return;}
+
+  if(!(await ensureEsptoolLoaded())){
+    setStatus('esptool-js failed to load — check network','d-err');
+    log('esptool-js module did not load.','e'); return;
+  }
+
   try {
-    setStatus('Requesting serial port...','d-busy');
+    setStatus('Requesting serial port…','d-busy');
+    log('Pick your COM port in the dialog…','i');
     port=await navigator.serial.requestPort();
-    transport=new Transport(port,true);
-    espLoader=new ESPLoader({transport:transport,baudrate:selectedBaud,romBaudrate:115200,terminal:ti,enableTracing:false,debugLogging:false});
-    var chip=await espLoader.main();
-    var fs=await espLoader.getFlashSize();
+
+    var info=port.getInfo?port.getInfo():{};
+    var vidpid=(info.usbVendorId!=null)
+      ?'VID:'+info.usbVendorId.toString(16).padStart(4,'0')+' PID:'+(info.usbProductId||0).toString(16).padStart(4,'0')
+      :'serial port';
+
     var ci=document.getElementById('chip-info');if(ci)ci.style.display='block';
-    var ct=document.getElementById('chip-text');if(ct)ct.textContent=chip+'  |  Flash: '+fs+' KB';
-    var bc=document.getElementById('btn-con');if(bc){bc.textContent='Connected';bc.disabled=true;}
+    var ct=document.getElementById('chip-text');if(ct)ct.textContent='Port selected ('+vidpid+') — chip detected on flash';
+    var bc=document.getElementById('btn-con');if(bc){bc.innerHTML='&#x26A1; Port Selected';bc.disabled=true;}
     var bd=document.getElementById('btn-dis');if(bd)bd.disabled=false;
-    setStatus('Connected - '+chip,'d-ok');
-    log('Connected: '+chip+'  Flash: '+fs+' KB','o');
+    setStatus('Port selected — ready to flash','d-ok');
+    log('Serial port selected ('+vidpid+').','o');
+    log('Chip detection runs when you click Flash.','i');
+
+    port.addEventListener('disconnect',function(){
+      log('Device disconnected from USB.','w');
+      handleDisconnect();
+    });
+
     if(flashParts.length){var bf=document.getElementById('btn-fla');if(bf)bf.disabled=false;}
     else log('Download firmware first, then Flash.','i');
   } catch(err) {
-    espLoader=null;transport=null;port=null;
-    setStatus('Connection failed: '+(err.message||err),'d-err');
-    log('Connection failed: '+(err.message||err),'e');
-    log('Hold BOOT -> press RESET -> release BOOT','w');
+    port=null;
+    if(err&&err.name==='NotFoundError'){
+      setStatus('Port selection cancelled','d-idle');
+      log('Port selection cancelled.','w');
+    } else {
+      setStatus('Connection failed: '+(err.message||err),'d-err');
+      log('Connection failed: '+(err.message||err),'e');
+      log('Tip: hold BOOT → tap RESET → release BOOT, then retry.','w');
+    }
   }
 }
 
 async function handleDisconnect() {
-  try{if(transport)await transport.disconnect();}catch(e){}
+  try{if(transport){try{await transport.disconnect();}catch(e){}transport=null;}}catch(e){}
+  try{if(port&&port.readable){try{await port.close();}catch(e){}}}catch(e){}
   espLoader=null;transport=null;port=null;
   var bc=document.getElementById('btn-con');if(bc){bc.innerHTML='&#x26A1; Connect';bc.disabled=false;}
   var bd=document.getElementById('btn-dis');if(bd)bd.disabled=true;
@@ -347,19 +390,41 @@ async function handleDisconnect() {
 }
 
 async function handleFlash() {
-  if(!espLoader||!flashParts.length||isFlashing)return;
+  if(!port||!flashParts.length||isFlashing)return;
   isFlashing=true;
   var bf=document.getElementById('btn-fla');if(bf)bf.disabled=true;
   var bc=document.getElementById('btn-con');if(bc)bc.disabled=true;
-  var fi=document.getElementById('fi');if(fi)fi.textContent='...';
-  var fl=document.getElementById('fl');if(fl)fl.textContent='Flashing...';
-  setStatus('Erasing + flashing '+flashParts.length+' parts...','d-busy',true);
-  setProgress(0,'Starting...','0%');
+  var bd=document.getElementById('btn-dis');if(bd)bd.disabled=true;
+  var fi=document.getElementById('fi');if(fi)fi.textContent='⏳';
+  var fl=document.getElementById('fl');if(fl)fl.textContent='Connecting…';
+  setStatus('Opening port & detecting chip…','d-busy',true);
+  setProgress(0,'Connecting…','0%');
   log('Flashing '+flashParts.length+' parts (bootloader + partitions + firmware)','i');
-  log('Erasing NVS - WiFiManager will show open AP on next boot','i');
+  log('eraseAll=true: NVS cleared — WiFiManager will show open AP on next boot','i');
   try {
-    await espLoader.write_flash({
-      fileArray: flashParts.map(function(p){return{data:p.data,address:p.address};}),
+    // Close port if left open from a prior attempt.
+    if(port.readable){try{await port.close();}catch(e){}}
+
+    transport=new Transport(port,true);
+    espLoader=new ESPLoader({
+      transport:transport,
+      baudrate:selectedBaud,
+      romBaudrate:115200,
+      terminal:ti,
+      enableTracing:false,
+      debugLogging:false
+    });
+
+    log('Connecting at '+selectedBaud+' baud…','i');
+    var chip=await espLoader.main();
+    log('Chip: '+chip,'o');
+    var ct=document.getElementById('chip-text');if(ct)ct.textContent='Chip: '+chip+' — flashing…';
+    if(fl)fl.textContent='Flashing…';
+    setStatus('Writing '+flashParts.length+' parts…','d-busy',true);
+    setProgress(0,'Starting…','0%');
+
+    await espLoader.writeFlash({
+      fileArray:flashParts.map(function(p){return{data:p.data,address:p.address};}),
       flashSize:'keep',flashMode:'keep',flashFreq:'keep',
       eraseAll:true,
       compress:true,
@@ -367,13 +432,23 @@ async function handleFlash() {
         var pct=Math.round(written/total*100);
         var name=flashParts[idx]?flashParts[idx].name:'';
         setProgress(pct,'Part '+(idx+1)+'/'+flashParts.length+' '+name,pct+'%');
-        setStatus('Flashing part '+(idx+1)+'/'+flashParts.length+'... '+pct+'%','d-busy',true);
+        setStatus('Flashing part '+(idx+1)+'/'+flashParts.length+'… '+pct+'%','d-busy',true);
+      },
+      calculateMD5Hash:function(image){
+        var wa=(typeof image==='string')
+          ?CryptoJS.enc.Latin1.parse(image)
+          :CryptoJS.lib.WordArray.create(image);
+        return CryptoJS.MD5(wa).toString();
       }
     });
-    setProgress(100,'Done!','100%');
-    await espLoader.after_flash('hard_reset');
+
+    setProgress(100,'Verifying & resetting…','100%');
+    log('Verifying flash & hard-resetting…','i');
+    try{await espLoader.hardReset();}
+    catch(e){try{await espLoader.after_flash('hard_reset');}catch(e2){}}
+
     setStatus('Flash complete! Device rebooting.','d-ok');
-    if(fi)fi.textContent='OK';if(fl)fl.textContent='Flash Complete';
+    if(fi)fi.textContent='✅';if(fl)fl.textContent='Flash Complete';
     log('All parts flashed successfully!','o');
     log('Connect to "ClaudeTokenMeter" WiFi (no password) to configure.','o');
     document.getElementById('ob').classList.add('show');
@@ -381,22 +456,27 @@ async function handleFlash() {
   } catch(err) {
     setStatus('Flash error: '+(err.message||err),'d-err');
     log('Flash error: '+(err.message||err),'e');
-    if(fi)fi.textContent='&#x1F680;';if(fl)fl.textContent='Retry Flash';
+    log('Re-enter bootloader mode (hold BOOT → tap RESET → release BOOT) and retry.','w');
+    if(fi)fi.textContent='🚀';if(fl)fl.textContent='Retry Flash';
+    try{if(transport)await transport.disconnect();}catch(e){}
+    transport=null;espLoader=null;
     if(bf)bf.disabled=false;
+    if(bd)bd.disabled=false;
   }
   isFlashing=false;
-  var bc2=document.getElementById('btn-con');if(bc2)bc2.disabled=false;
+  var bc2=document.getElementById('btn-con');if(bc2)bc2.disabled=!!port;
 }
 
 window.addEventListener('load',function(){
   if(!('serial' in navigator)){
-    setStatus('Web Serial unavailable - use Chrome/Edge 89+','d-err');
+    setStatus('Web Serial unavailable — use Chrome/Edge 89+','d-err');
     var bc=document.getElementById('btn-con');if(bc)bc.disabled=true;
     log('Web Serial API not available.','e');
   } else {
-    log('Web Serial API ready','o');
+    log('Web Serial API ready ✅','o');
     log('Click Download Firmware, then Connect, then Flash All Parts.','i');
   }
+  // Show latest release tag in footer.
   (async function(){
     var gs=document.getElementById('gh-status');
     var fv=document.getElementById('fw-ver');
@@ -405,9 +485,9 @@ window.addEventListener('load',function(){
       if(!r.ok)throw new Error('HTTP '+r.status);
       var d=await r.json();
       if(fv&&d.tag_name)fv.textContent=d.tag_name;
-      if(gs){gs.style.color='var(--muted)';gs.textContent='Latest: '+d.tag_name+' - click button to download';}
+      if(gs){gs.style.color='var(--muted)';gs.textContent='Latest: '+d.tag_name+' — click button to download';}
     }catch(e){
-      if(gs){gs.style.color='var(--yellow)';gs.textContent='Warning: '+e.message;}
+      if(gs){gs.style.color='var(--yellow)';gs.textContent='Offline — firmware bundled in page';}
     }
   })();
 });
