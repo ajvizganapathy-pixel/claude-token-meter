@@ -603,7 +603,7 @@ footer a:hover { color: var(--purple2); }
       <button onclick="clearLog()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-family:var(--mono);font-size:11px">clear</button>
     </div>
     <div class="terminal" id="terminal">
-      <span class="log-info">Claude Token Meter Web Flasher  v1.0.0</span><br>
+      <span class="log-info">Claude Token Meter Web Flasher  v1.1.0</span><br>
       <span class="log-info">────────────────────────────────────</span><br>
       <span class="log-info">Waiting for connection...</span><br>
       <span class="log-cursor"></span>
@@ -951,77 +951,144 @@ async function fetchLatestRelease() {
 async function downloadFromGitHub() {
   const $btn    = document.getElementById('btn-gh-download');
   const $status = document.getElementById('gh-status');
-  if (!$status) return;
+  const $fwNm   = document.getElementById('fw-name');
 
-  $btn.disabled        = true;
-  $status.style.color  = 'var(--muted)';
-  $status.textContent  = '🔍 Fetching release info from GitHub...';
-  log('Fetching latest release info from GitHub API...', 'info');
+  if (!$btn || !$status) {
+    console.error('Required DOM elements missing');
+    return;
+  }
+
+  $btn.disabled       = true;
+  $status.style.color = 'var(--muted)';
+  $status.textContent = '🔍 Querying GitHub Releases API...';
+  log('───────────────────────────────────────────', 'info');
+  log('Starting GitHub firmware download', 'info');
 
   try {
-    // Step 1: get latest release metadata via GitHub API
+    // ── Step 1: get release metadata (api.github.com has wildcard CORS) ──
     const apiUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
+    log(`GET ${apiUrl}`, 'data');
+
     const metaRes = await fetch(apiUrl, {
       headers: { 'Accept': 'application/vnd.github+json' },
-      cache: 'no-cache'
+      cache:   'no-cache'
     });
 
     if (!metaRes.ok) {
-      throw new Error(`GitHub API returned HTTP ${metaRes.status}. Is the repo public and does a release exist?`);
+      const bodyText = await metaRes.text().catch(() => '');
+      throw new Error(`GitHub API HTTP ${metaRes.status}. ${bodyText.slice(0, 120)}`);
     }
 
     const release = await metaRes.json();
     const tag     = release.tag_name;
+    if (!tag) throw new Error('Release metadata has no tag_name');
 
-    if (!tag) throw new Error('Release found but tag_name is missing in API response.');
-
-    // Verify the asset exists in the release
-    const assetMeta = release.assets && release.assets.find(a => a.name === GITHUB_ASSET);
-    const assetSize = assetMeta ? assetMeta.size : null;
-
-    $status.textContent = `⬇ Downloading ${GITHUB_ASSET} from ${tag}${assetSize ? ' (' + (assetSize/1024).toFixed(1) + ' KB)' : ''}...`;
-    log(`Release: ${tag} | Asset: ${GITHUB_ASSET}${assetSize ? ' | ' + (assetSize/1024).toFixed(1) + ' KB' : ''}`, 'data');
-
-    // Step 2: download binary using the direct CDN URL (avoids CORS on browser_download_url)
-    // Pattern: github.com/OWNER/REPO/releases/download/TAG/FILE — public repos, no auth required
-    const directUrl = `https://github.com/${GITHUB_REPO}/releases/download/${tag}/${GITHUB_ASSET}`;
-    log(`Download URL: ${directUrl}`, 'info');
-
-    const binRes = await fetch(directUrl, { cache: 'no-cache' });
-
-    if (!binRes.ok) {
-      throw new Error(`Binary download failed: HTTP ${binRes.status}. Check that firmware.bin is attached to release ${tag}.`);
+    const asset = (release.assets || []).find(a => a.name === GITHUB_ASSET);
+    if (!asset) {
+      const found = (release.assets || []).map(a => a.name).join(', ') || '(none)';
+      throw new Error(`No "${GITHUB_ASSET}" in release ${tag}. Found: ${found}`);
     }
 
-    const contentType = binRes.headers.get('content-type') || '';
-    const arrayBuf    = await binRes.arrayBuffer();
+    log(`Release ${tag} — asset id ${asset.id}, size ${(asset.size/1024).toFixed(1)} KB`, 'data');
+    $status.textContent = `⬇ Downloading firmware ${tag}...`;
 
-    if (arrayBuf.byteLength < 1024) {
-      throw new Error(`Downloaded file is only ${arrayBuf.byteLength} bytes — likely an error page, not firmware.`);
+    // ── Step 2: multi-strategy binary download (handles GitHub CORS quirks) ──
+    // GitHub's release-asset downloads redirect to objects.githubusercontent.com
+    // which sometimes lacks CORS headers. We try 3 routes in order until one
+    // succeeds. The first (api.github.com asset endpoint with Accept:
+    // octet-stream) is the officially-documented CORS-safe path.
+    const strategies = [
+      {
+        name: 'GitHub API asset endpoint',
+        fn: async () => {
+          const url = `https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${asset.id}`;
+          const r = await fetch(url, {
+            headers: { 'Accept': 'application/octet-stream' },
+            cache:   'no-cache'
+          });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.arrayBuffer();
+        }
+      },
+      {
+        name: 'Direct browser_download_url',
+        fn: async () => {
+          const r = await fetch(asset.browser_download_url, { cache: 'no-cache' });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.arrayBuffer();
+        }
+      },
+      {
+        name: 'CORS proxy (corsproxy.io)',
+        fn: async () => {
+          const proxy = 'https://corsproxy.io/?';
+          const url   = proxy + encodeURIComponent(asset.browser_download_url);
+          const r = await fetch(url, { cache: 'no-cache' });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.arrayBuffer();
+        }
+      },
+      {
+        name: 'CORS proxy (allorigins)',
+        fn: async () => {
+          const proxy = 'https://api.allorigins.win/raw?url=';
+          const url   = proxy + encodeURIComponent(asset.browser_download_url);
+          const r = await fetch(url, { cache: 'no-cache' });
+          if (!r.ok) throw new Error(`HTTP ${r.status}`);
+          return r.arrayBuffer();
+        }
+      }
+    ];
+
+    let arrayBuf = null;
+    let lastErr  = null;
+
+    for (let i = 0; i < strategies.length; i++) {
+      const s = strategies[i];
+      try {
+        $status.textContent = `⬇ Trying route ${i+1}/${strategies.length}: ${s.name}...`;
+        log(`Route ${i+1}: ${s.name}`, 'info');
+        arrayBuf = await s.fn();
+        // sanity check: at least 50 KB (firmware is ~700-900 KB normally)
+        if (arrayBuf.byteLength < 50 * 1024) {
+          throw new Error(`File too small: ${arrayBuf.byteLength} bytes (likely an error page)`);
+        }
+        log(`✓ Route ${i+1} succeeded: ${(arrayBuf.byteLength/1024).toFixed(1)} KB`, 'ok');
+        break;
+      } catch (err) {
+        lastErr = err;
+        log(`✗ Route ${i+1} failed: ${err.message}`, 'warn');
+        arrayBuf = null;
+      }
     }
 
-    const u8      = new Uint8Array(arrayBuf);
-    firmwareData  = u8.reduce((acc, b) => acc + String.fromCharCode(b), '');
-    firmwareSize  = u8.length;
+    if (!arrayBuf) {
+      throw new Error(`All ${strategies.length} download routes failed. Last error: ${lastErr ? lastErr.message : 'unknown'}`);
+    }
 
-    const fwNameEl = document.getElementById('fw-name');
-    if (fwNameEl) fwNameEl.textContent = `✅  ${GITHUB_ASSET}  from ${tag}  (${(firmwareSize / 1024).toFixed(1)} KB)`;
+    // ── Step 3: load into esptool-js firmware buffer ──
+    const u8 = new Uint8Array(arrayBuf);
+    firmwareData = u8.reduce((acc, b) => acc + String.fromCharCode(b), '');
+    firmwareSize = u8.length;
+
+    if ($fwNm) $fwNm.textContent = `✅  ${GITHUB_ASSET}  from ${tag}  (${(firmwareSize/1024).toFixed(1)} KB)`;
 
     $status.style.color = 'var(--green)';
     $status.textContent = `✅ Ready — ${tag}  published ${new Date(release.published_at).toLocaleDateString()}`;
-    log(`✅ Firmware loaded: ${(firmwareSize/1024).toFixed(1)} KB from ${tag}`, 'ok');
+    log(`✅ Firmware ready: ${(firmwareSize/1024).toFixed(1)} KB from release ${tag}`, 'ok');
 
     if (typeof espLoader !== 'undefined' && espLoader) {
-      document.getElementById('btn-flash').disabled = false;
+      const fb = document.getElementById('btn-flash');
+      if (fb) fb.disabled = false;
     } else {
-      log('ℹ Firmware ready. Click Connect to link to the ESP32, then Flash.', 'info');
+      log('Now click "Connect" to link to the XIAO ESP32-S3, then "Flash".', 'info');
     }
 
   } catch (err) {
     $status.style.color = 'var(--red)';
     $status.textContent = `❌ ${err.message}`;
-    log(`❌ Download failed: ${err.message}`, 'error');
-    log('Fallback: use the file picker below to select firmware.bin manually.', 'warn');
+    log(`❌ Download failed completely: ${err.message}`, 'error');
+    log('Fallback: manually download firmware.bin from GitHub Releases and use the file picker below.', 'warn');
     console.error('downloadFromGitHub error:', err);
   }
 
@@ -1039,9 +1106,16 @@ window.addEventListener('load', () => {
     log('Web Serial API detected ✅', 'ok');
     log('Select firmware.bin or download from GitHub, then click Connect.', 'info');
   }
-  // Fetch latest release tag and update footer + download button status
+  // ─── Auto-discover latest release on page load ───
   (async () => {
     const $ghStatus = document.getElementById('gh-status');
+    const $fwFoot   = document.getElementById('fw');
+
+    if ($ghStatus) {
+      $ghStatus.style.color = 'var(--muted)';
+      $ghStatus.textContent = 'Checking GitHub for latest release...';
+    }
+
     try {
       const r = await fetch(
         `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`,
@@ -1050,25 +1124,25 @@ window.addEventListener('load', () => {
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const d = await r.json();
 
+      if ($fwFoot && d.tag_name) $fwFoot.textContent = d.tag_name;
+
       // Update the release-tag span inside the button
       const tagEl = document.getElementById('release-tag');
       if (tagEl && d.tag_name) tagEl.textContent = d.tag_name;
 
-      // Update footer version badge
-      const fwEl = document.getElementById('fw');
-      if (fwEl && d.tag_name) fwEl.textContent = d.tag_name;
-
-      // Update the download button area to show the available version
       if ($ghStatus) {
-        $ghStatus.style.color   = 'var(--muted)';
-        $ghStatus.textContent   = `Latest release: ${d.tag_name}  (${new Date(d.published_at).toLocaleDateString()})`;
+        const date = new Date(d.published_at).toLocaleDateString();
+        const asset = (d.assets || []).find(a => a.name === GITHUB_ASSET);
+        const sizeKB = asset ? (asset.size / 1024).toFixed(1) + ' KB' : '';
+        $ghStatus.style.color = 'var(--muted)';
+        $ghStatus.textContent = `Latest: ${d.tag_name} ${sizeKB ? '(' + sizeKB + ')' : ''} — ${date}`;
       }
     } catch (e) {
       if ($ghStatus) {
-        $ghStatus.style.color   = 'var(--red)';
-        $ghStatus.textContent   = `⚠ Could not reach GitHub API: ${e.message}`;
+        $ghStatus.style.color = 'var(--yellow)';
+        $ghStatus.textContent = `⚠ Could not auto-check latest release (${e.message}). Click button to retry.`;
       }
-      console.warn('Could not fetch release info:', e);
+      console.warn('Release auto-discovery failed:', e);
     }
   })();
 });
