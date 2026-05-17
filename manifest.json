@@ -1,13 +1,22 @@
 {
   "name": "Claude Token Meter",
   "version": "v1.2.0",
+  "new_install_prompt_erase": true,
   "builds": [
     {
       "chipFamily": "ESP32-S3",
       "parts": [
         {
-          "path": "firmware.bin",
+          "path": "https://github.com/ajvizganapathy-pixel/claude-token-meter/releases/download/v1.2.0/bootloader.bin",
           "offset": 0
+        },
+        {
+          "path": "https://github.com/ajvizganapathy-pixel/claude-token-meter/releases/download/v1.2.0/partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "https://github.com/ajvizganapathy-pixel/claude-token-meter/releases/download/v1.2.0/firmware.bin",
+          "offset": 65536
         }
       ]
     }
