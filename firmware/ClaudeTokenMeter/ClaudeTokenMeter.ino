@@ -78,7 +78,7 @@ Adafruit_SSD1306 oled(SCREEN_W, SCREEN_H, &Wire, OLED_RESET);
 // ─────────────────────────────────────────────────
 //   FIRMWARE CONSTANTS
 // ─────────────────────────────────────────────────
-#define FW_VERSION        "1.1.0"
+#define FW_VERSION        "1.2.0"
 #define AP_NAME           "ClaudeTokenMeter"   // Open AP — no password
 #define MDNS_NAME         "claude-meter"       // → http://claude-meter.local
 #define NTP_SERVER        "pool.ntp.org"
@@ -1056,12 +1056,24 @@ void setup() {
   sprintf(cfgLimit, "%ld", prefs.getLong("weeklyLimit", 1000000));
   prefs.end();
 
+  // ── First-boot: clear WiFi creds if firmware version changed ──────────
+  prefs.begin("ctmeter", true);
+  String storedVer = prefs.getString("fwVersion", "");
+  prefs.end();
+  bool isNewFirmware = (storedVer != FW_VERSION);
+  if (isNewFirmware) {
+    Serial.printf("[BOOT] New firmware v%s (prev: '%s') — clearing saved Wi-Fi\n",
+                  FW_VERSION, storedVer.c_str());
+    WiFiManager _wm;
+    _wm.resetSettings();   // clears only WiFiManager's NVS keys (ssid/pass)
+  }
+
   // ── WiFiManager ───────────────────────────────
   drawWiFiPortal();
 
   WiFiManager wm;
   wm.setTitle("Claude Token Meter Setup");
-  wm.setConfigPortalTimeout(300);  // 5 min before giving up
+  wm.setConfigPortalTimeout(isNewFirmware ? 0 : 300);  // no timeout on first boot
   wm.setConnectTimeout(30);
   wm.setDarkMode(true);
 
@@ -1096,6 +1108,14 @@ void setup() {
   if (!wm.autoConnect(AP_NAME)) {   // Empty password = open network
     Serial.println(F("[WiFi] Failed / timeout → restarting"));
     ESP.restart();
+  }
+
+  // Save firmware version only after successful Wi-Fi connect
+  if (isNewFirmware) {
+    prefs.begin("ctmeter", false);
+    prefs.putString("fwVersion", FW_VERSION);
+    prefs.end();
+    Serial.printf("[BOOT] fwVersion v%s saved to NVS\n", FW_VERSION);
   }
 
   // Refresh params after portal

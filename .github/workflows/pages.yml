@@ -41,6 +41,21 @@ jobs:
           fi
         continue-on-error: true
 
+      - name: Update manifest.json version from latest release
+        run: |
+          TAG=$(curl -sf "https://api.github.com/repos/${{ github.repository }}/releases/latest" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin).get('tag_name',''))" 2>/dev/null || echo '')
+          if [ -n "$TAG" ]; then
+            python3 -c "
+          import json
+          with open('manifest.json') as f: m = json.load(f)
+          m['version'] = '$TAG'
+          with open('manifest.json', 'w') as f: json.dump(m, f, indent=2)
+          print('manifest.json version:', '$TAG')
+            "
+          fi
+        continue-on-error: true
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 

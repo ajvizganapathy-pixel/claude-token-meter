@@ -32,10 +32,45 @@ jobs:
       - name: Build firmware
         run: pio run -e xiao_esp32s3
 
-      - name: Copy firmware to flasher/
+      - name: Produce merged firmware (bootloader + partitions + app at 0x0)
         run: |
-          cp .pio/build/xiao_esp32s3/firmware.bin flasher/firmware.bin
-          echo "Firmware size: $(wc -c < flasher/firmware.bin) bytes"
+          pip install esptool -q
+          BOOT_APP0=$(find ~/.platformio/packages -name "boot_app0.bin" -path "*/partitions/*" 2>/dev/null | head -1)
+          BOOTLOADER=".pio/build/xiao_esp32s3/bootloader.bin"
+          PARTITIONS=".pio/build/xiao_esp32s3/partitions.bin"
+          APP=".pio/build/xiao_esp32s3/firmware.bin"
+          MERGED="flasher/firmware.bin"
+          echo "Bootloader:  $(wc -c < $BOOTLOADER) bytes"
+          echo "Partitions:  $(wc -c < $PARTITIONS) bytes"
+          echo "Application: $(wc -c < $APP) bytes"
+          if [ -n "$BOOT_APP0" ]; then
+            echo "boot_app0:   $BOOT_APP0"
+            python -m esptool --chip esp32s3 merge_bin \
+              -o "$MERGED" \
+              0x0     "$BOOTLOADER" \
+              0x8000  "$PARTITIONS" \
+              0xe000  "$BOOT_APP0" \
+              0x10000 "$APP"
+          else
+            python -m esptool --chip esp32s3 merge_bin \
+              -o "$MERGED" \
+              0x0     "$BOOTLOADER" \
+              0x8000  "$PARTITIONS" \
+              0x10000 "$APP"
+          fi
+          echo "Merged firmware: $(wc -c < $MERGED) bytes"
+
+      - name: Update manifest.json version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          python3 -c "
+          import json
+          tag = '${{ github.ref_name }}'
+          with open('manifest.json') as f: m = json.load(f)
+          m['version'] = tag
+          with open('manifest.json', 'w') as f: json.dump(m, f, indent=2)
+          print('manifest.json version:', tag)
+          "
 
       - name: Upload firmware artifact
         uses: actions/upload-artifact@v4
@@ -44,6 +79,7 @@ jobs:
           path: |
             flasher/firmware.bin
             flasher/index.html
+            manifest.json
           retention-days: 90
 
   release:
@@ -65,7 +101,9 @@ jobs:
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/firmware.bin
+          files: |
+            dist/firmware.bin
+            dist/manifest.json
           generate_release_notes: true
           body: |
             ## Claude Token Meter Firmware ${{ github.ref_name }}
