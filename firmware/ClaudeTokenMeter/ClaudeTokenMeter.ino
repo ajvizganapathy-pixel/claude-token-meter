@@ -96,6 +96,7 @@ Adafruit_SSD1306 oled(SCREEN_W, SCREEN_H, &Wire, OLED_RESET);
 // ─────────────────────────────────────────────────
 Preferences  prefs;
 WebServer    httpServer(80);
+bool         audioEnabled = false;   // set true after successful I2S init
 
 // WiFiManager custom parameters (persisted in NVS)
 char cfgApiKey[80]  = "";
@@ -144,6 +145,7 @@ void i2sInit() {
   cfg.sample_rate          = I2S_SAMPLE_RATE;
   cfg.bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT;
   cfg.channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT;
+  cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;  // required — must be non-zero
   cfg.intr_alloc_flags     = ESP_INTR_FLAG_LEVEL1;
   cfg.dma_buf_count        = 8;
   cfg.dma_buf_len          = 256;
@@ -156,13 +158,19 @@ void i2sInit() {
   pins.data_out_num = I2S_DOUT_PIN;
   pins.data_in_num  = I2S_PIN_NO_CHANGE;
 
-  i2s_driver_install(I2S_NUM_0, &cfg, 0, nullptr);
+  esp_err_t err = i2s_driver_install(I2S_NUM_0, &cfg, 0, nullptr);
+  if (err != ESP_OK) {
+    Serial.printf("[I2S]  driver install failed: %s — audio disabled\n", esp_err_to_name(err));
+    return;
+  }
   i2s_set_pin(I2S_NUM_0, &pins);
   i2s_zero_dma_buffer(I2S_NUM_0);
+  audioEnabled = true;
 }
 
 // Play a sine-wave tone with fade-in/out envelope
 void playTone(uint16_t freq, uint16_t durationMs, uint8_t vol = 80) {
+  if (!audioEnabled) return;
   const int SAMPLES = (I2S_SAMPLE_RATE * durationMs) / 1000;
   const float AMP   = (float)vol / 100.0f * 28000.0f;
   const int FADE    = (I2S_SAMPLE_RATE * 12) / 1000; // 12 ms fade
@@ -650,7 +658,7 @@ void handleRoot() {
 }
 
 void handleApiStatus() {
-  DynamicJsonDocument doc(768);
+  JsonDocument doc;
   doc["device"]       = cfgDevName;
   doc["weeklyTotal"]  = stats.weeklyTotal;
   doc["dailyTotal"]   = stats.dailyTotal;
@@ -688,33 +696,33 @@ void handleApiUpdate() {
     return;
   }
 
-  DynamicJsonDocument doc(512);
+  JsonDocument doc;
   if (deserializeJson(doc, httpServer.arg("plain")) != DeserializationError::Ok) {
     httpServer.send(400, "text/plain", "Bad JSON");
     return;
   }
 
-  if (doc.containsKey("weeklyTotal"))  stats.weeklyTotal  = doc["weeklyTotal"].as<long>();
-  if (doc.containsKey("dailyTotal"))   stats.dailyTotal   = doc["dailyTotal"].as<long>();
-  if (doc.containsKey("sessionTotal")) stats.sessionTotal = doc["sessionTotal"].as<long>();
-  if (doc.containsKey("inputTokens"))  stats.inputTokens  = doc["inputTokens"].as<long>();
-  if (doc.containsKey("outputTokens")) stats.outputTokens = doc["outputTokens"].as<long>();
-  if (doc.containsKey("cacheRead"))    stats.cacheRead    = doc["cacheRead"].as<long>();
-  if (doc.containsKey("cacheWrite"))   stats.cacheWrite   = doc["cacheWrite"].as<long>();
-  if (doc.containsKey("weeklyLimit"))  stats.weeklyLimit  = doc["weeklyLimit"].as<long>();
-  if (doc.containsKey("costUSD"))      stats.costUSD      = doc["costUSD"].as<float>();
-  if (doc.containsKey("model"))
+  if (!doc["weeklyTotal"].isNull())  stats.weeklyTotal  = doc["weeklyTotal"].as<long>();
+  if (!doc["dailyTotal"].isNull())   stats.dailyTotal   = doc["dailyTotal"].as<long>();
+  if (!doc["sessionTotal"].isNull()) stats.sessionTotal = doc["sessionTotal"].as<long>();
+  if (!doc["inputTokens"].isNull())  stats.inputTokens  = doc["inputTokens"].as<long>();
+  if (!doc["outputTokens"].isNull()) stats.outputTokens = doc["outputTokens"].as<long>();
+  if (!doc["cacheRead"].isNull())    stats.cacheRead    = doc["cacheRead"].as<long>();
+  if (!doc["cacheWrite"].isNull())   stats.cacheWrite   = doc["cacheWrite"].as<long>();
+  if (!doc["weeklyLimit"].isNull())  stats.weeklyLimit  = doc["weeklyLimit"].as<long>();
+  if (!doc["costUSD"].isNull())      stats.costUSD      = doc["costUSD"].as<float>();
+  if (!doc["model"].isNull())
     strlcpy(stats.model, doc["model"].as<const char*>(), sizeof(stats.model));
 
   // Increment mode: add to running totals instead of replacing
-  if (doc.containsKey("deltaTokens")) {
+  if (!doc["deltaTokens"].isNull()) {
     long delta = doc["deltaTokens"].as<long>();
     stats.weeklyTotal  += delta;
     stats.dailyTotal   += delta;
     stats.sessionTotal += delta;
-    if (doc.containsKey("deltaInput"))  stats.inputTokens  += doc["deltaInput"].as<long>();
-    if (doc.containsKey("deltaOutput")) stats.outputTokens += doc["deltaOutput"].as<long>();
-    if (doc.containsKey("deltaCost"))   stats.costUSD      += doc["deltaCost"].as<float>();
+    if (!doc["deltaInput"].isNull())  stats.inputTokens  += doc["deltaInput"].as<long>();
+    if (!doc["deltaOutput"].isNull()) stats.outputTokens += doc["deltaOutput"].as<long>();
+    if (!doc["deltaCost"].isNull())   stats.costUSD      += doc["deltaCost"].as<float>();
   }
 
   // Timestamp
@@ -736,9 +744,9 @@ void handleApiConfig() {
     httpServer.send(405, "text/plain", "Method Not Allowed");
     return;
   }
-  DynamicJsonDocument doc(256);
+  JsonDocument doc;
   if (deserializeJson(doc, httpServer.arg("plain")) == DeserializationError::Ok) {
-    if (doc.containsKey("weeklyLimit")) {
+    if (!doc["weeklyLimit"].isNull()) {
       stats.weeklyLimit = doc["weeklyLimit"].as<long>();
       prefs.begin("ctmeter", false);
       prefs.putLong("weeklyLimit", stats.weeklyLimit);
@@ -894,7 +902,7 @@ void setupOTA() {
     String type = (ArduinoOTA.getCommand() == U_FLASH) ? "sketch" : "filesystem";
     Serial.printf("[OTA]  Start — updating %s\n", type.c_str());
     otaInProgress = true;
-    i2s_zero_dma_buffer(I2S_NUM_0);   // silence audio during OTA
+    if (audioEnabled) i2s_zero_dma_buffer(I2S_NUM_0);   // silence audio during OTA
     drawOtaStart();
   });
 
@@ -1024,7 +1032,7 @@ void setup() {
   Serial.begin(115200);
   delay(100);
   Serial.println(F("\n\n╔═══════════════════════════════╗"));
-  Serial.println(F(  "║   Claude Token Meter  v1.0.0  ║"));
+  Serial.printf(     "║   Claude Token Meter  v%s  ║\n", FW_VERSION);
   Serial.println(F(  "║   XIAO ESP32-S3 Firmware      ║"));
   Serial.println(F(  "╚═══════════════════════════════╝\n"));
 
@@ -1034,13 +1042,14 @@ void setup() {
 
   // ── OLED init ────────────────────────────────
   Wire.begin(SDA_PIN, SCL_PIN);
-  if (!oled.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
-    Serial.println(F("[OLED] INIT FAILED — check wiring & address!"));
-    while (true) delay(500);
+  bool oledOk = oled.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
+  if (!oledOk) {
+    Serial.println(F("[OLED] INIT FAILED — check wiring & address! Continuing without display."));
+  } else {
+    oled.setTextColor(WHITE);
+    drawSplash();
+    Serial.println(F("[OLED] OK"));
   }
-  oled.setTextColor(WHITE);
-  drawSplash();
-  Serial.println(F("[OLED] OK"));
 
   // ── I2S init ─────────────────────────────────
   i2sInit();
@@ -1069,7 +1078,8 @@ void setup() {
   }
 
   // ── WiFiManager ───────────────────────────────
-  drawWiFiPortal();
+  // Show "Connecting..." during the silent WiFi connect attempt
+  drawConnecting(0);
 
   WiFiManager wm;
   wm.setTitle("Claude Token Meter Setup");
@@ -1098,9 +1108,10 @@ void setup() {
     Serial.println(F("[WiFi] Params saved"));
   });
 
-  // AP mode callback (shown while portal is open)
+  // AP mode callback — only show portal screen when the AP is actually open
   wm.setAPCallback([](WiFiManager* wm) {
     Serial.printf("[WiFi] AP started: %s  IP: 192.168.4.1\n", AP_NAME);
+    drawWiFiPortal();
   });
 
   // ── Open AP — NO password ─────────────────────

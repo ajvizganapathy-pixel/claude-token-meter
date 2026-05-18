@@ -13,12 +13,11 @@ Configured via platformio.ini:
   extra_scripts = post:scripts/merge_firmware.py
 """
 Import("env")
-import shutil, os, subprocess
+import shutil, os, sys, subprocess
 
 def merge_firmware(source, target, env):
     build_dir     = env.subst("$BUILD_DIR")
     project_dir   = env.subst("$PROJECT_DIR")
-    framework_dir = env.subst("$FRAMEWORK_DIR")
 
     app_bin    = str(target[0])
     bootloader = os.path.join(build_dir, "bootloader.bin")
@@ -26,22 +25,29 @@ def merge_firmware(source, target, env):
     dest       = os.path.join(project_dir, "flasher", "firmware.bin")
     dest_root  = os.path.join(project_dir, "firmware.bin")
 
-    # Locate boot_app0.bin (OTA data initializer) in PlatformIO framework
-    boot_app0 = os.path.join(framework_dir, "tools", "partitions", "boot_app0.bin")
-    if not os.path.exists(boot_app0):
-        pio_home = os.path.expanduser("~/.platformio")
-        boot_app0 = None
-        for root, dirs, files in os.walk(pio_home):
-            if "boot_app0.bin" in files and "partitions" in root:
-                boot_app0 = os.path.join(root, "boot_app0.bin")
-                break
+    # Locate boot_app0.bin — search PlatformIO packages
+    pio_home  = os.path.expanduser("~/.platformio")
+    boot_app0 = None
+    for root, dirs, files in os.walk(pio_home):
+        if "boot_app0.bin" in files and "partitions" in root:
+            boot_app0 = os.path.join(root, "boot_app0.bin")
+            break
 
     os.makedirs(os.path.dirname(dest), exist_ok=True)
 
-    cmd = ["python", "-m", "esptool", "--chip", "esp32s3", "merge_bin",
-           "-o", dest,
-           "0x0",    bootloader,
-           "0x8000", partitions]
+    # Prefer PlatformIO's bundled esptool.py; fall back to the module form.
+    pio_esptool = os.path.join(pio_home, "packages", "tool-esptoolpy", "esptool.py")
+    python_exe  = sys.executable   # the Python that PlatformIO is running under
+
+    if os.path.exists(pio_esptool):
+        base_cmd = [python_exe, pio_esptool]
+    else:
+        base_cmd = [python_exe, "-m", "esptool"]
+
+    cmd = base_cmd + ["--chip", "esp32s3", "merge_bin",
+                      "-o", dest,
+                      "0x0",    bootloader,
+                      "0x8000", partitions]
     if boot_app0 and os.path.exists(boot_app0):
         cmd += ["0xe000", boot_app0]
     cmd += ["0x10000", app_bin]
@@ -56,7 +62,7 @@ def merge_firmware(source, target, env):
         shutil.copy(dest, dest_root)
 
     size_kb = os.path.getsize(dest) // 1024
-    print(f"  firmware.bin → flasher/firmware.bin  ({size_kb} KB)")
+    print(f"  firmware.bin -> flasher/firmware.bin  ({size_kb} KB)")
     print(f"{'='*55}\n")
 
 env.AddPostAction("$BUILD_DIR/${PROGNAME}.bin", merge_firmware)

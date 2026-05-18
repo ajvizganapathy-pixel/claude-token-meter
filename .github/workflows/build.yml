@@ -26,24 +26,36 @@ jobs:
           key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini') }}
           restore-keys: pio-${{ runner.os }}-
 
-      - name: Install PlatformIO
-        run: pip install platformio
+      - name: Install PlatformIO and esptool
+        run: pip install platformio esptool
 
       - name: Build firmware
         run: pio run -e xiao_esp32s3
 
-      - name: Collect individual firmware parts
+      - name: Collect firmware parts
         run: |
-          pip install esptool -q
           mkdir -p dist
-          BOOT_APP0=$(find ~/.platformio/packages -name "boot_app0.bin" -path "*/partitions/*" 2>/dev/null | head -1)
           BOOTLOADER=".pio/build/xiao_esp32s3/bootloader.bin"
           PARTITIONS=".pio/build/xiao_esp32s3/partitions.bin"
-          APP=".pio/build/xiao_esp32s3/firmware.bin"
 
           cp "$BOOTLOADER" dist/bootloader.bin
           cp "$PARTITIONS" dist/partitions.bin
-          cp "$APP"        dist/firmware.bin
+
+          # Use the merged binary (bootloader+partitions+app at offset 0x0)
+          # produced by scripts/merge_firmware.py post-build hook.
+          # Falls back to app-only if merge failed (rare).
+          if [ -f "firmware.bin" ] && [ "$(wc -c < firmware.bin)" -gt 100000 ]; then
+            cp firmware.bin dist/firmware.bin
+            echo "Using merged firmware.bin ($(wc -c < dist/firmware.bin) bytes)"
+          else
+            echo "Merged binary not found or too small — building manually"
+            BOOT_APP0=$(find ~/.platformio/packages -name "boot_app0.bin" -path "*/partitions/*" 2>/dev/null | head -1)
+            MERGE_ARGS="--chip esp32s3 merge_bin -o dist/firmware.bin 0x0 $BOOTLOADER 0x8000 $PARTITIONS"
+            [ -n "$BOOT_APP0" ] && MERGE_ARGS="$MERGE_ARGS 0xe000 $BOOT_APP0"
+            MERGE_ARGS="$MERGE_ARGS 0x10000 .pio/build/xiao_esp32s3/firmware.bin"
+            python -m esptool $MERGE_ARGS || cp .pio/build/xiao_esp32s3/firmware.bin dist/firmware.bin
+            echo "Fallback firmware.bin: $(wc -c < dist/firmware.bin) bytes"
+          fi
 
           echo "bootloader.bin:  $(wc -c < dist/bootloader.bin) bytes"
           echo "partitions.bin:  $(wc -c < dist/partitions.bin) bytes"
