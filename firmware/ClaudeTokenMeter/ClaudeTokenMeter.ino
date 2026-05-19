@@ -21,6 +21,65 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include <ArduinoJson.h>
+#include <WiFiUdp.h>
+
+// ── Captive Portal DNS Server ──────────────────────────────
+// Responds to ALL DNS queries with the AP IP (192.168.4.1)
+// so Android + iOS auto-open the setup page.
+class CaptiveDNS {
+  WiFiUDP udp;
+  uint8_t buf[256];
+public:
+  void begin() { udp.begin(53); }
+  void handle() {
+    int len = udp.parsePacket();
+    if (len < 12 || len > (int)sizeof(buf)) return;
+    udp.read(buf, sizeof(buf));
+    uint8_t resp[300];
+    memcpy(resp, buf, len);
+    resp[2] = 0x81; resp[3] = 0x80;
+    resp[6] = 0;    resp[7] = 1;
+    int rlen = len;
+    resp[rlen++] = 0xC0; resp[rlen++] = 0x0C;
+    resp[rlen++] = 0x00; resp[rlen++] = 0x01;
+    resp[rlen++] = 0x00; resp[rlen++] = 0x01;
+    resp[rlen++] = 0x00; resp[rlen++] = 0x00;
+    resp[rlen++] = 0x00; resp[rlen++] = 0x3C;
+    resp[rlen++] = 0x00; resp[rlen++] = 0x04;
+    resp[rlen++] = 192;  resp[rlen++] = 168;
+    resp[rlen++] = 4;    resp[rlen++] = 1;
+    udp.beginPacket(udp.remoteIP(), udp.remotePort());
+    udp.write(resp, rlen);
+    udp.endPacket();
+  }
+  void stop() { udp.stop(); }
+};
+
+CaptiveDNS captiveDNS;
+
+// ── Smart model name shortener ─────────────────────────────
+// "claude-sonnet-4-20250514" -> "Sonnet 4"
+// "claude-opus-4-20250514"   -> "Opus 4"
+// "claude-3-5-haiku-..."     -> "Haiku 3.5"
+String shortModel(const String& m) {
+  String s = m; s.toLowerCase();
+  if (s.length() == 0 || s == "—") return String("—");
+
+  String tier;
+  if      (s.indexOf("opus")   != -1) tier = "Opus";
+  else if (s.indexOf("sonnet") != -1) tier = "Sonnet";
+  else if (s.indexOf("haiku")  != -1) tier = "Haiku";
+  else if (s.indexOf("claude") != -1) tier = "Claude";
+  else { String t = m; if (t.length() > 12) t = t.substring(0, 12); return t; }
+
+  String ver;
+  if      (s.indexOf("-4-") != -1 || s.endsWith("-4")) ver = " 4";
+  else if (s.indexOf("3-7") != -1 || s.indexOf("3.7") != -1) ver = " 3.7";
+  else if (s.indexOf("3-5") != -1 || s.indexOf("3.5") != -1) ver = " 3.5";
+  else if (s.indexOf("-3-") != -1 || s.endsWith("-3")) ver = " 3";
+
+  return tier + ver;
+}
 
 // ─── OLED ──────────────────────────────────────────────────────────
 #define OLED_WIDTH   128
@@ -136,10 +195,12 @@ void drawPageModel() {
   display.setTextSize(1);
   display.setCursor(0, 0);
   display.print("MODEL");
+  display.setTextSize(2);
   display.setCursor(0, 12);
-  String m = stats.model;
-  if (m.length() > 21) m = m.substring(0, 21);
+  String m = shortModel(stats.model);
+  if (m.length() > 10) m = m.substring(0, 10);
   display.print(m);
+  display.setTextSize(1);
 
   display.setCursor(0, 32);
   char buf[32];
@@ -281,7 +342,7 @@ String statusHTML() {
                "<h1>Claude Token Meter</h1>");
   h += "<div class=row><span>Weekly</span><b>" + formatK(stats.weeklyTotal) + " / " + formatK(cfg.limit) + "</b></div>";
   h += "<div class=bar><div class=fill style='width:" + String(pct, 1) + "%'></div></div>";
-  h += "<div class=row><span>Model</span><b>" + htmlEscape(stats.model) + "</b></div>";
+  h += "<div class=row><span>Model</span><b>" + htmlEscape(shortModel(stats.model)) + " <span style='color:#888;font-size:.8em'>(" + htmlEscape(stats.model) + ")</span></b></div>";
   h += "<div class=row><span>Cost (USD)</span><b>$" + String(stats.costUSD, 4) + "</b></div>";
   h += "<div class=row><span>Daily</span><b>" + formatK(stats.dailyTotal) + "</b></div>";
   h += "<div class=row><span>Session</span><b>" + formatK(stats.sessionTotal) + "</b></div>";
@@ -314,6 +375,7 @@ void handleSave() {
       "<h2>Saved.</h2><p>Device will now connect to WiFi.</p></body>"));
 
   delay(2000);
+  captiveDNS.stop();
   WiFi.softAPdisconnect(true);
   WiFi.mode(WIFI_STA);
   WiFi.begin(cfg.ssid.c_str(), cfg.pass.c_str());
@@ -403,6 +465,21 @@ void handleReboot() {
 void setupRoutes() {
   server.on("/",            HTTP_GET,  handleRoot);
   server.on("/save",        HTTP_POST, handleSave);
+
+  // Captive portal detection endpoints — redirect to setup page
+  auto redirectSetup = []() {
+    server.sendHeader("Location", "http://192.168.4.1/", true);
+    server.send(302, "text/plain", "");
+  };
+  server.on("/generate_204",              redirectSetup); // Android
+  server.on("/gen_204",                   redirectSetup); // Android alt
+  server.on("/connecttest.txt",           redirectSetup); // Windows
+  server.on("/redirect",                  redirectSetup); // iOS
+  server.on("/hotspot-detect.html",       redirectSetup); // iOS/macOS
+  server.on("/library/test/success.html", redirectSetup); // iOS
+  server.on("/success.txt",               redirectSetup); // iOS alt
+  server.on("/ncsi.txt",                  redirectSetup); // Windows NCSI
+
   server.on("/api/status",  HTTP_GET,  handleApiStatus);
   server.on("/api/update",  HTTP_POST, handleApiUpdate);
   server.on("/api/config",  HTTP_GET,  handleApiConfig);
@@ -420,6 +497,7 @@ void startAP() {
   WiFi.mode(WIFI_AP);
   WiFi.softAP("ClaudeTokenMeter");
   WiFi.scanNetworks(true);
+  captiveDNS.begin();
   wifiState = WIFI_AP_MODE;
 }
 
@@ -501,6 +579,7 @@ void setup() {
 
 void loop() {
   server.handleClient();
+  if (wifiState == WIFI_AP_MODE) captiveDNS.handle();
   updateWifi();
 
   uint32_t now = millis();

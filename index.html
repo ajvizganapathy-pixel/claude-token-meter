@@ -156,7 +156,7 @@ footer a:hover{color:var(--purple2)}
       <button onclick="clearLog()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-family:var(--mono);font-size:11px">clear</button>
     </div>
     <div class="term" id="term">
-      <span class="li">Claude Token Meter Web Flasher  v1.2.0  (esptool-js 0.4.6)</span><br>
+      <span class="li">Claude Token Meter Web Flasher v2.0  (esptool-js 0.4.6)</span><br>
       <span class="li">&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;&#x2500;</span><br>
       <span class="li">Full flash: bootloader + partitions + firmware (erases NVS)</span><br>
       <span class="lc"></span>
@@ -202,7 +202,7 @@ footer a:hover{color:var(--purple2)}
   Claude Token Meter &nbsp;&bull;&nbsp; XIAO ESP32-S3 &nbsp;&bull;&nbsp;
   <a href="https://github.com/ajvizganapathy-pixel/claude-token-meter" target="_blank">GitHub</a> &nbsp;&bull;&nbsp;
   <a href="https://github.com/ajvizganapathy-pixel/claude-token-meter/releases" target="_blank">Releases</a> &nbsp;&bull;&nbsp;
-  FW <span id="fw-ver">v1.2.0</span> &nbsp;&bull;&nbsp;
+  FW <span id="fw-ver">v2.0</span> &nbsp;&bull;&nbsp;
   Uses <a href="https://github.com/espressif/esptool-js" target="_blank">esptool-js</a>
 </footer>
 
@@ -270,7 +270,7 @@ async function downloadFirmware() {
     var mf=await mr.json();
 
     // Display version from GitHub API (read-only, CORS safe).
-    var tag=mf.version||'v1.2.0';
+    var tag=mf.version||'v2.0';
     try {
       var ar=await fetch('https://api.github.com/repos/'+REPO+'/releases/latest',{headers:{'Accept':'application/vnd.github+json'},cache:'no-cache'});
       if(ar.ok){var rel=await ar.json();if(rel.tag_name){tag=rel.tag_name;}}

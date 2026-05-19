@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 # ─── Constants ──────────────────────────────────────────────
-VERSION        = "1.0.0"
+VERSION        = "2.0"
 POLL_INTERVAL  = 30        # seconds between ESP32 updates
 DISPLAY_PERIOD = 5         # seconds between console refreshes
 WEEKLY_DEFAULT = 1_000_000 # fallback limit if not set on device
@@ -78,130 +78,241 @@ def discover_device(timeout: float = 5.0) -> Optional[str]:
 #   CLAUDE CODE  — local database reader
 # ════════════════════════════════════════════════════════════
 
-def get_claude_code_path() -> Path:
-    """Return the platform-specific Claude Code data directory."""
+def get_claude_dirs() -> list:
+    """Return all possible Claude Code data directories for this OS."""
+    dirs = []
+    home = Path.home()
     system = platform.system()
     if system == "Windows":
-        base = Path(os.environ.get("APPDATA", "~")).expanduser()
-        return base / "Claude"
+        appdata = Path(os.environ.get("APPDATA", str(home)))
+        dirs += [appdata / "Claude", appdata / "claude"]
+        localappdata = Path(os.environ.get("LOCALAPPDATA", str(home)))
+        dirs += [localappdata / "Claude", localappdata / "claude"]
+        dirs += [home / ".claude"]
     elif system == "Darwin":
-        return Path.home() / ".claude"
+        dirs += [
+            home / ".claude",
+            home / "Library" / "Application Support" / "Claude",
+            home / "Library" / "Caches" / "Claude",
+        ]
     else:
-        return Path.home() / ".claude"
+        dirs += [
+            home / ".claude",
+            home / ".config" / "claude",
+            home / ".local" / "share" / "claude",
+            Path("/root/.claude"),
+        ]
+    return [d for d in dirs if d.exists()]
+
+
+# Back-compat alias
+def get_claude_code_path() -> Path:
+    dirs = get_claude_dirs()
+    return dirs[0] if dirs else Path.home() / ".claude"
 
 
 def read_claude_code_stats() -> Optional[Dict[str, Any]]:
     """
-    Read token usage from Claude Code's local storage.
-    Returns dict with token counts or None if unavailable.
+    Read real session token usage from Claude Code local storage.
+    Scans SQLite databases AND .jsonl/.json files in every known directory.
+    Works for Claude Pro subscribers — reads what Claude Code actually wrote
+    to disk, regardless of subscription tier.
     """
-    base = get_claude_code_path()
-    if not base.exists():
-        return None
-
-    stats: Dict[str, Any] = {
-        "weeklyTotal":   0,
-        "dailyTotal":    0,
-        "sessionTotal":  0,
-        "inputTokens":   0,
-        "outputTokens":  0,
-        "cacheRead":     0,
-        "cacheWrite":    0,
-        "model":         "claude-sonnet",
-        "costUSD":       0.0,
-    }
-
     now      = datetime.datetime.now(datetime.timezone.utc)
     week_ago = now - datetime.timedelta(days=7)
     day_ago  = now - datetime.timedelta(days=1)
 
-    # ── Try SQLite (newer Claude Code versions) ──────────────
-    for db_name in ("usage.db", "claude.db", "history.db"):
-        db_path = base / db_name
-        if db_path.exists():
-            try:
-                conn = sqlite3.connect(str(db_path))
-                conn.row_factory = sqlite3.Row
-                cur = conn.cursor()
-
-                # Try common schema patterns
-                for table in ("usage", "token_usage", "api_usage"):
-                    try:
-                        cur.execute(f"SELECT * FROM {table} LIMIT 1")
-                        cols = [c[0].lower() for c in cur.description]
-
-                        # Build time-filtered query
-                        ts_col = next((c for c in cols if "time" in c or "date" in c or "created" in c), None)
-                        if ts_col:
-                            cur.execute(
-                                f"SELECT * FROM {table} WHERE {ts_col} >= ?",
-                                (week_ago.isoformat(),)
-                            )
-                        else:
-                            cur.execute(f"SELECT * FROM {table}")
-
-                        rows = cur.fetchall()
-                        for row in rows:
-                            d = dict(row)
-                            inp  = d.get("input_tokens", d.get("inputTokens", 0)) or 0
-                            out  = d.get("output_tokens", d.get("outputTokens", 0)) or 0
-                            cr   = d.get("cache_read_tokens", d.get("cacheRead", 0)) or 0
-                            cw   = d.get("cache_write_tokens", d.get("cacheWrite", 0)) or 0
-                            total = inp + out + cr + cw
-
-                            stats["weeklyTotal"]  += total
-                            stats["inputTokens"]  += inp
-                            stats["outputTokens"] += out
-                            stats["cacheRead"]    += cr
-                            stats["cacheWrite"]   += cw
-                            if d.get("model"):
-                                stats["model"] = d["model"]
-
-                        conn.close()
-                        if stats["weeklyTotal"] > 0:
-                            break
-                    except sqlite3.OperationalError:
-                        continue
-            except Exception as e:
-                pass
-
-    # ── Try JSON logs ────────────────────────────────────────
-    if stats["weeklyTotal"] == 0:
-        for json_glob in ["**/*.json", "*.json", "usage*.json"]:
-            for jf in base.glob(json_glob):
-                if jf.stat().st_size > 10 * 1024 * 1024:
-                    continue  # skip huge files
-                try:
-                    with open(jf, "r", encoding="utf-8", errors="ignore") as f:
-                        data = json.load(f)
-                    # Handle array of records
-                    if isinstance(data, list):
-                        for rec in data:
-                            if not isinstance(rec, dict):
-                                continue
-                            inp = rec.get("input_tokens", rec.get("inputTokens", 0)) or 0
-                            out = rec.get("output_tokens", rec.get("outputTokens", 0)) or 0
-                            stats["weeklyTotal"]  += inp + out
-                            stats["inputTokens"]  += inp
-                            stats["outputTokens"] += out
-                    elif isinstance(data, dict):
-                        inp = data.get("input_tokens", data.get("inputTokens", 0)) or 0
-                        out = data.get("output_tokens", data.get("outputTokens", 0)) or 0
-                        stats["weeklyTotal"]  += inp + out
-                        stats["inputTokens"]  += inp
-                        stats["outputTokens"] += out
-                except Exception:
-                    pass
-
-    # ── Estimate cost ────────────────────────────────────────
-    stats["costUSD"] = (
-        stats["inputTokens"]  * PRICE_INPUT  +
-        stats["outputTokens"] * PRICE_OUTPUT +
-        stats["cacheRead"]    * PRICE_CACHE_R +
-        stats["cacheWrite"]   * PRICE_CACHE_W
+    totals: Dict[str, Any] = dict(
+        weeklyTotal=0, dailyTotal=0, sessionTotal=0,
+        inputTokens=0, outputTokens=0,
+        cacheRead=0, cacheWrite=0,
+        costUSD=0.0, model="claude-sonnet-4",
     )
 
-    return stats if stats["weeklyTotal"] > 0 else None
+    claude_dirs = get_claude_dirs()
+    if not claude_dirs:
+        print("  [companion] No Claude Code data directory found.")
+        print("  [companion] Expected: ~/.claude/  or  %APPDATA%/Claude/")
+        return None
+
+    found_anything = False
+    for base in claude_dirs:
+        print(f"  [companion] Scanning: {base}")
+
+        # ── 1. SQLite databases ────────────────────────────────────
+        for db_path in base.rglob("*.db"):
+            try:
+                conn = sqlite3.connect(str(db_path), timeout=3)
+                conn.row_factory = sqlite3.Row
+                cur = conn.cursor()
+                cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                tables = [r[0] for r in cur.fetchall()]
+                for table in tables:
+                    try:
+                        cur.execute(f"PRAGMA table_info([{table}])")
+                        cols = [r[1].lower() for r in cur.fetchall()]
+                        if not any("token" in c or "usage" in c for c in cols):
+                            continue
+                        time_col = next((c for c in cols
+                                         if any(x in c for x in
+                                                ["timestamp", "created", "time", "date"])), None)
+                        if time_col:
+                            cur.execute(
+                                f"SELECT * FROM [{table}] WHERE [{time_col}] >= ?",
+                                (week_ago.isoformat(),))
+                        else:
+                            cur.execute(f"SELECT * FROM [{table}]")
+                        for row in cur.fetchall():
+                            d = dict(row)
+                            inp = int(d.get("input_tokens")  or d.get("inputtokens")  or 0)
+                            out = int(d.get("output_tokens") or d.get("outputtokens") or 0)
+                            cr  = int(d.get("cache_read_input_tokens")
+                                      or d.get("cachereadtokens") or 0)
+                            cw  = int(d.get("cache_creation_input_tokens")
+                                      or d.get("cachewritetokens") or 0)
+                            total = inp + out + cr + cw
+                            if total == 0:
+                                continue
+                            found_anything = True
+                            totals["weeklyTotal"]  += total
+                            totals["inputTokens"]  += inp
+                            totals["outputTokens"] += out
+                            totals["cacheRead"]    += cr
+                            totals["cacheWrite"]   += cw
+                            if time_col:
+                                try:
+                                    ts = datetime.datetime.fromisoformat(
+                                        str(d.get(time_col, "")).replace("Z", "+00:00"))
+                                    if ts >= day_ago:
+                                        totals["dailyTotal"] += total
+                                except Exception:
+                                    pass
+                            mdl = d.get("model") or d.get("model_id") or ""
+                            if mdl and "claude" in str(mdl).lower():
+                                totals["model"] = str(mdl)
+                    except sqlite3.OperationalError:
+                        continue
+                conn.close()
+            except Exception:
+                pass
+
+        # ── 2. JSON / JSONL files ──────────────────────────────────
+        seen = set()
+        patterns = ["**/*.jsonl", "**/usage*.json", "**/stats*.json",
+                    "**/session*.json", "**/*.json"]
+        for pattern in patterns:
+            for jf in base.glob(pattern):
+                if jf in seen:
+                    continue
+                seen.add(jf)
+                try:
+                    if jf.stat().st_size > 50 * 1024 * 1024:
+                        continue
+                    with open(jf, "r", encoding="utf-8", errors="ignore") as f:
+                        content = f.read().strip()
+                except Exception:
+                    continue
+                if not content:
+                    continue
+
+                is_jsonl = jf.suffix == ".jsonl" or (
+                    content.startswith("{") and "\n{" in content[:500])
+
+                if is_jsonl:
+                    for line in content.splitlines():
+                        line = line.strip()
+                        if not line or not line.startswith("{"):
+                            continue
+                        try:
+                            rec = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        usage = (rec.get("usage")
+                                 or (rec.get("message", {}) or {}).get("usage")
+                                 or (rec.get("response", {}) or {}).get("usage") or {})
+                        if not usage:
+                            continue
+                        inp = int(usage.get("input_tokens", 0) or 0)
+                        out = int(usage.get("output_tokens", 0) or 0)
+                        cr  = int(usage.get("cache_read_input_tokens", 0) or 0)
+                        cw  = int(usage.get("cache_creation_input_tokens", 0) or 0)
+                        total = inp + out + cr + cw
+                        if total == 0:
+                            continue
+
+                        # Time filter — only count last 7 days
+                        ts_str = (rec.get("timestamp")
+                                  or rec.get("created_at")
+                                  or (rec.get("message", {}) or {}).get("created_at"))
+                        in_week, in_day = True, False
+                        if ts_str:
+                            try:
+                                ts = datetime.datetime.fromisoformat(
+                                    str(ts_str).replace("Z", "+00:00"))
+                                if ts.tzinfo is None:
+                                    ts = ts.replace(tzinfo=datetime.timezone.utc)
+                                in_week = ts >= week_ago
+                                in_day  = ts >= day_ago
+                            except Exception:
+                                pass
+                        if not in_week:
+                            continue
+
+                        found_anything = True
+                        totals["weeklyTotal"]  += total
+                        totals["inputTokens"]  += inp
+                        totals["outputTokens"] += out
+                        totals["cacheRead"]    += cr
+                        totals["cacheWrite"]   += cw
+                        if in_day:
+                            totals["dailyTotal"] += total
+                        mdl = (rec.get("model")
+                               or (rec.get("message", {}) or {}).get("model") or "")
+                        if mdl and "claude" in str(mdl).lower():
+                            totals["model"] = str(mdl)
+                else:
+                    try:
+                        data = json.loads(content)
+                    except json.JSONDecodeError:
+                        continue
+                    items = data if isinstance(data, list) else [data]
+                    for rec in items:
+                        if not isinstance(rec, dict):
+                            continue
+                        usage = rec.get("usage") or rec
+                        inp = int(usage.get("input_tokens",  usage.get("inputTokens", 0)) or 0)
+                        out = int(usage.get("output_tokens", usage.get("outputTokens", 0)) or 0)
+                        cr  = int(usage.get("cache_read_input_tokens", 0) or 0)
+                        cw  = int(usage.get("cache_creation_input_tokens", 0) or 0)
+                        total = inp + out + cr + cw
+                        if total == 0:
+                            continue
+                        found_anything = True
+                        totals["weeklyTotal"]  += total
+                        totals["inputTokens"]  += inp
+                        totals["outputTokens"] += out
+                        totals["cacheRead"]    += cr
+                        totals["cacheWrite"]   += cw
+                        mdl = rec.get("model") or ""
+                        if mdl and "claude" in str(mdl).lower():
+                            totals["model"] = str(mdl)
+
+    if not found_anything:
+        print("  [companion] No token usage data found in Claude Code files.")
+        print("  [companion] Make sure Claude Code has been used at least once.")
+        print("  [companion] Dirs scanned:", [str(d) for d in claude_dirs])
+        return None
+
+    totals["costUSD"] = round(
+        totals["inputTokens"]  * PRICE_INPUT  +
+        totals["outputTokens"] * PRICE_OUTPUT +
+        totals["cacheRead"]    * PRICE_CACHE_R +
+        totals["cacheWrite"]   * PRICE_CACHE_W,
+        6,
+    )
+    print(f"  [companion] Found: weekly={totals['weeklyTotal']:,}  "
+          f"model={totals['model']}  cost=${totals['costUSD']:.4f}")
+    return totals
 
 
 # ════════════════════════════════════════════════════════════
@@ -380,6 +491,22 @@ def main() -> None:
     print(f"╔═══════════════════════════════════════════╗")
     print(f"║  Claude Token Meter Companion  v{VERSION}   ║")
     print(f"╚═══════════════════════════════════════════╝\n")
+
+    # Quick scan — show what Claude Code files exist on this machine
+    print("[companion] Scanning for Claude Code data...")
+    _dirs = get_claude_dirs()
+    if _dirs:
+        for _d in _dirs:
+            try:
+                _db = len(list(_d.rglob("*.db")))
+                _js = len(list(_d.rglob("*.json"))) + len(list(_d.rglob("*.jsonl")))
+                print(f"  Found: {_d}  ({_db} .db, {_js} .json/.jsonl)")
+            except Exception:
+                print(f"  Found: {_d}  (could not enumerate)")
+    else:
+        print("  WARNING: No Claude Code directory found!")
+        print("  Install Claude Code: https://claude.ai/code")
+    print()
 
     # ── Find device ──────────────────────────────────────────
     device_ip = args.ip
