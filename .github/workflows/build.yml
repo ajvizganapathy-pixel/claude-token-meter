@@ -94,6 +94,8 @@ jobs:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
     name: Publish GitHub Release
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout
