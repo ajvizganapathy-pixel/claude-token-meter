@@ -46,6 +46,7 @@
 #include <WebServer.h>
 #include <ESPmDNS.h>
 #include <Preferences.h>
+#include <nvs_flash.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
@@ -78,7 +79,7 @@ Adafruit_SSD1306 oled(SCREEN_W, SCREEN_H, &Wire, OLED_RESET);
 // ─────────────────────────────────────────────────
 //   FIRMWARE CONSTANTS
 // ─────────────────────────────────────────────────
-#define FW_VERSION        "1.2.0"
+#define FW_VERSION        "1.2.1"
 #define AP_NAME           "ClaudeTokenMeter"   // Open AP — no password
 #define MDNS_NAME         "claude-meter"       // → http://claude-meter.local
 #define NTP_SERVER        "pool.ntp.org"
@@ -90,6 +91,11 @@ Adafruit_SSD1306 oled(SCREEN_W, SCREEN_H, &Wire, OLED_RESET);
 #define RESET_CHECK_MS    60000  // check daily/weekly resets every 60s
 #define MAX_PAGES         4
 #define I2S_SAMPLE_RATE   22050
+
+// ─────────────────────────────────────────────────
+//   BOOT STABILITY  (RTC RAM — survives reset, cleared by power-off)
+// ─────────────────────────────────────────────────
+RTC_DATA_ATTR static uint8_t s_bootFails = 0;   // consecutive incomplete boots
 
 // ─────────────────────────────────────────────────
 //   GLOBALS
@@ -747,10 +753,14 @@ void handleApiConfig() {
   JsonDocument doc;
   if (deserializeJson(doc, httpServer.arg("plain")) == DeserializationError::Ok) {
     if (!doc["weeklyLimit"].isNull()) {
-      stats.weeklyLimit = doc["weeklyLimit"].as<long>();
-      prefs.begin("ctmeter", false);
-      prefs.putLong("weeklyLimit", stats.weeklyLimit);
-      prefs.end();
+      long newLim = doc["weeklyLimit"].as<long>();
+      if (newLim > 0 && newLim <= 100000000L) {
+        stats.weeklyLimit = newLim;
+        if (prefs.begin("ctmeter", false)) {
+          prefs.putLong("weeklyLimit", stats.weeklyLimit);
+          prefs.end();
+        }
+      }
     }
     if (doc["resetStats"].as<bool>()) {
       stats.weeklyTotal = stats.dailyTotal = stats.sessionTotal = 0;
@@ -800,11 +810,30 @@ void checkAlerts() {
 }
 
 // ════════════════════════════════════════════════
+//   NVS SAFETY HELPERS
+// ════════════════════════════════════════════════
+
+// Wipe the "ctmeter" namespace and reinitialise the NVS flash layer.
+// Call when NVS is suspected corrupt or on forced safe-mode entry.
+void eraseAppNVS() {
+  Serial.println(F("[NVS]  Erasing app namespace..."));
+  Preferences p;
+  if (p.begin("ctmeter", false)) { p.clear(); p.end(); }
+  // Full partition erase as fallback — recovers from deep corruption.
+  nvs_flash_erase();
+  nvs_flash_init();
+  Serial.println(F("[NVS]  Erase complete."));
+}
+
+// ════════════════════════════════════════════════
 //   PERSISTENCE
 // ════════════════════════════════════════════════
 
 void loadStats() {
-  prefs.begin("ctmeter", true);
+  if (!prefs.begin("ctmeter", true)) {
+    Serial.println(F("[NVS]  No saved stats — using defaults"));
+    return;   // struct members are already default-initialised
+  }
   stats.weeklyTotal  = prefs.getLong("weeklyTotal",  0);
   stats.dailyTotal   = prefs.getLong("dailyTotal",   0);
   stats.sessionTotal = prefs.getLong("sessionTotal", 0);
@@ -821,7 +850,10 @@ void loadStats() {
 }
 
 void saveStats() {
-  prefs.begin("ctmeter", false);
+  if (!prefs.begin("ctmeter", false)) {
+    Serial.println(F("[NVS]  saveStats: cannot open namespace — skipping"));
+    return;
+  }
   prefs.putLong("weeklyTotal",  stats.weeklyTotal);
   prefs.putLong("dailyTotal",   stats.dailyTotal);
   prefs.putLong("sessionTotal", stats.sessionTotal);
@@ -957,7 +989,10 @@ void checkAutoReset() {
   long curDay  = (long)(epoch / 86400L);
   long curWeek = (long)(epoch / (86400L * 7L));
 
-  prefs.begin("ctmeter", false);
+  if (!prefs.begin("ctmeter", false)) {
+    Serial.println(F("[RESET] NVS open failed — skipping reset check"));
+    return;
+  }
   long savedDay  = prefs.getLong("savedDay",  0L);
   long savedWeek = prefs.getLong("savedWeek", 0L);
 
@@ -1030,61 +1065,119 @@ void checkBootButton() {
 
 void setup() {
   Serial.begin(115200);
-  delay(100);
-  Serial.println(F("\n\n╔═══════════════════════════════╗"));
-  Serial.printf(     "║   Claude Token Meter  v%s  ║\n", FW_VERSION);
-  Serial.println(F(  "║   XIAO ESP32-S3 Firmware      ║"));
-  Serial.println(F(  "╚═══════════════════════════════╝\n"));
+  delay(200);
 
+  // ── Boot fail tracking ────────────────────────
+  // s_bootFails is in RTC RAM: survives resets, cleared by power-off.
+  // Incremented now; reset to 0 only when setup() completes successfully.
+  s_bootFails++;
+  const bool safeMode = (s_bootFails >= 3);
+
+  Serial.println(F("\n[BOOT] =============================="));
+  Serial.printf(   "[BOOT] Claude Token Meter  v%s\n", FW_VERSION);
+  Serial.printf(   "[BOOT] boot attempt %d  safeMode=%d\n", s_bootFails, safeMode);
+  Serial.println(F("[BOOT] ==============================\n"));
+
+  // ── GPIO ─────────────────────────────────────
   pinMode(LED_PIN, OUTPUT);
   digitalWrite(LED_PIN, LOW);
-  pinMode(BOOT_PIN, INPUT_PULLUP);   // BOOT button for factory reset
+  pinMode(BOOT_PIN, INPUT_PULLUP);
 
-  // ── OLED init ────────────────────────────────
+  // ── OLED ─────────────────────────────────────
   Wire.begin(SDA_PIN, SCL_PIN);
   bool oledOk = oled.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR);
-  if (!oledOk) {
-    Serial.println(F("[OLED] INIT FAILED — check wiring & address! Continuing without display."));
-  } else {
+  if (oledOk) {
     oled.setTextColor(WHITE);
-    drawSplash();
+    if (safeMode) {
+      oled.clearDisplay();
+      oled.setTextSize(1);
+      drawCentered("SAFE MODE", 8);
+      drawCentered("Clearing config...", 24);
+      drawCentered("Connect to:", 38);
+      drawCentered(AP_NAME, 50);
+      oled.display();
+    } else {
+      drawSplash();
+    }
     Serial.println(F("[OLED] OK"));
+  } else {
+    Serial.println(F("[OLED] FAILED — continuing without display"));
   }
 
-  // ── I2S init ─────────────────────────────────
+  // ── I2S ──────────────────────────────────────
   i2sInit();
-  delay(150);
-  playPattern(1);   // Startup chime
+  delay(100);
+  playPattern(1);
   Serial.println(F("[I2S]  OK"));
 
-  // ── Load saved stats & config ─────────────────
-  loadStats();
-  prefs.begin("ctmeter", true);
-  strlcpy(cfgApiKey,  prefs.getString("apiKey",  "").c_str(), sizeof(cfgApiKey));
-  strlcpy(cfgDevName, prefs.getString("devName", "ClaudeTokenMeter").c_str(), sizeof(cfgDevName));
-  sprintf(cfgLimit, "%ld", prefs.getLong("weeklyLimit", 1000000));
-  prefs.end();
-
-  // ── First-boot: clear WiFi creds if firmware version changed ──────────
-  prefs.begin("ctmeter", true);
-  String storedVer = prefs.getString("fwVersion", "");
-  prefs.end();
-  bool isNewFirmware = (storedVer != FW_VERSION);
-  if (isNewFirmware) {
-    Serial.printf("[BOOT] New firmware v%s (prev: '%s') — clearing saved Wi-Fi\n",
-                  FW_VERSION, storedVer.c_str());
+  // ── Safe mode: wipe NVS + WiFi, reset counter ──
+  if (safeMode) {
+    Serial.println(F("[SAFE] Erasing NVS and WiFi credentials"));
+    eraseAppNVS();
     WiFiManager _wm;
-    _wm.resetSettings();   // clears only WiFiManager's NVS keys (ssid/pass)
+    _wm.resetSettings();
+    s_bootFails = 0;
+    delay(1500);
+  }
+
+  // ── Load NVS config safely ────────────────────
+  loadStats();
+  {
+    Preferences cfg;
+    if (cfg.begin("ctmeter", true)) {
+      strlcpy(cfgApiKey,  cfg.getString("apiKey",  "").c_str(),                  sizeof(cfgApiKey));
+      strlcpy(cfgDevName, cfg.getString("devName", "ClaudeTokenMeter").c_str(),  sizeof(cfgDevName));
+      sprintf(cfgLimit,   "%ld", cfg.getLong("weeklyLimit", 1000000));
+      cfg.end();
+    }
+  }
+
+  // ── Validate config values ────────────────────
+  if (stats.weeklyLimit <= 0 || stats.weeklyLimit > 100000000L) {
+    Serial.printf("[NVS]  Invalid weeklyLimit=%ld — resetting\n", stats.weeklyLimit);
+    stats.weeklyLimit = 1000000L;
+  }
+  sprintf(cfgLimit, "%ld", stats.weeklyLimit);
+  if (strlen(cfgDevName) == 0) strlcpy(cfgDevName, "ClaudeTokenMeter", sizeof(cfgDevName));
+
+  // ── New firmware detection ────────────────────
+  // Read stored version; if it differs, do a clean slate for this FW build.
+  String storedVer = "";
+  {
+    Preferences vp;
+    if (vp.begin("ctmeter", true)) {
+      storedVer = vp.getString("fwVersion", "");
+      vp.end();
+    }
+  }
+  const bool isNewFirmware = (!safeMode && storedVer != FW_VERSION);
+  if (isNewFirmware) {
+    Serial.printf("[BOOT] New firmware v%s (prev: '%s') — resetting NVS + WiFi\n",
+                  FW_VERSION, storedVer.c_str());
+    eraseAppNVS();
+    WiFiManager _wm;
+    _wm.resetSettings();
+
+    // Write fwVersion IMMEDIATELY — before attempting WiFi.
+    // This prevents the clear-credentials cycle if anything crashes later.
+    Preferences vw;
+    if (vw.begin("ctmeter", false)) {
+      vw.putString("fwVersion",  FW_VERSION);
+      vw.putLong("weeklyLimit",  stats.weeklyLimit);
+      vw.end();
+      Serial.printf("[BOOT] fwVersion v%s persisted early\n", FW_VERSION);
+    } else {
+      Serial.println(F("[BOOT] WARNING: could not persist fwVersion"));
+    }
   }
 
   // ── WiFiManager ───────────────────────────────
-  // Show "Connecting..." during the silent WiFi connect attempt
   drawConnecting(0);
 
   WiFiManager wm;
   wm.setTitle("Claude Token Meter Setup");
-  wm.setConfigPortalTimeout(isNewFirmware ? 0 : 300);  // no timeout on first boot
-  wm.setConnectTimeout(30);
+  wm.setConfigPortalTimeout(0);   // NEVER timeout — no reboot-loop from portal expiry
+  wm.setConnectTimeout(20);       // 20s to connect to saved WiFi before opening portal
   wm.setDarkMode(true);
 
   WiFiManagerParameter p_apikey ("apikey",  "Anthropic API Key (optional)",  cfgApiKey,  79);
@@ -1094,50 +1187,74 @@ void setup() {
   wm.addParameter(&p_limit);
   wm.addParameter(&p_devname);
 
-  // Save callback
+  // Save callback — each write is checked individually so a single key failure
+  // doesn't abort the whole save.
   wm.setSaveParamsCallback([&]() {
     strlcpy(cfgApiKey,  p_apikey.getValue(),  sizeof(cfgApiKey));
     strlcpy(cfgDevName, p_devname.getValue(), sizeof(cfgDevName));
     strlcpy(cfgLimit,   p_limit.getValue(),   sizeof(cfgLimit));
-    stats.weeklyLimit = atol(cfgLimit);
-    prefs.begin("ctmeter", false);
-    prefs.putString("apiKey",    cfgApiKey);
-    prefs.putString("devName",   cfgDevName);
-    prefs.putLong("weeklyLimit", stats.weeklyLimit);
-    prefs.end();
-    Serial.println(F("[WiFi] Params saved"));
+    long newLim = (strlen(cfgLimit) > 0) ? atol(cfgLimit) : 0;
+    if (newLim > 0 && newLim <= 100000000L) stats.weeklyLimit = newLim;
+    sprintf(cfgLimit, "%ld", stats.weeklyLimit);
+
+    Preferences cfg;
+    if (cfg.begin("ctmeter", false)) {
+      cfg.putString("apiKey",    cfgApiKey);
+      cfg.putString("devName",   cfgDevName);
+      cfg.putLong("weeklyLimit", stats.weeklyLimit);
+      cfg.putString("fwVersion", FW_VERSION);   // keep fwVersion in sync
+      cfg.end();
+      Serial.println(F("[WiFi] Config saved to NVS"));
+    } else {
+      Serial.println(F("[WiFi] WARNING: config NVS open failed — retrying with erase"));
+      eraseAppNVS();
+      Preferences cfg2;
+      if (cfg2.begin("ctmeter", false)) {
+        cfg2.putString("apiKey",    cfgApiKey);
+        cfg2.putString("devName",   cfgDevName);
+        cfg2.putLong("weeklyLimit", stats.weeklyLimit);
+        cfg2.putString("fwVersion", FW_VERSION);
+        cfg2.end();
+        Serial.println(F("[WiFi] Config saved after NVS erase"));
+      }
+    }
   });
 
-  // AP mode callback — only show portal screen when the AP is actually open
-  wm.setAPCallback([](WiFiManager* wm) {
-    Serial.printf("[WiFi] AP started: %s  IP: 192.168.4.1\n", AP_NAME);
+  // AP callback — only show portal screen when portal is actually open
+  wm.setAPCallback([](WiFiManager*) {
+    Serial.printf("[WiFi] AP open: %s  IP: 192.168.4.1\n", AP_NAME);
     drawWiFiPortal();
   });
 
-  // ── Open AP — NO password ─────────────────────
-  Serial.println(F("[WiFi] Starting... (open AP if no saved credentials)"));
-  if (!wm.autoConnect(AP_NAME)) {   // Empty password = open network
-    Serial.println(F("[WiFi] Failed / timeout → restarting"));
+  Serial.println(F("[WiFi] Starting..."));
+  bool wifiOk = wm.autoConnect(AP_NAME);
+
+  if (!wifiOk) {
+    // With timeout=0 this should never fire, but handle defensively.
+    Serial.println(F("[WiFi] autoConnect failed — restarting"));
+    delay(500);
     ESP.restart();
   }
 
-  // Save firmware version only after successful Wi-Fi connect
-  if (isNewFirmware) {
-    prefs.begin("ctmeter", false);
-    prefs.putString("fwVersion", FW_VERSION);
-    prefs.end();
-    Serial.printf("[BOOT] fwVersion v%s saved to NVS\n", FW_VERSION);
-  }
+  // ── WiFi connected ────────────────────────────
+  Serial.printf("[WiFi] Connected  IP: %s  RSSI: %d dBm\n",
+                WiFi.localIP().toString().c_str(), WiFi.RSSI());
 
-  // Refresh params after portal
+  // Refresh cfgApiKey / devName / limit from portal (may have changed)
   strlcpy(cfgApiKey,  p_apikey.getValue(),  sizeof(cfgApiKey));
   strlcpy(cfgDevName, p_devname.getValue(), sizeof(cfgDevName));
   strlcpy(cfgLimit,   p_limit.getValue(),   sizeof(cfgLimit));
-  if (strlen(cfgLimit) > 0) stats.weeklyLimit = atol(cfgLimit);
+  {
+    long lim = (strlen(cfgLimit) > 0) ? atol(cfgLimit) : 0;
+    if (lim > 0 && lim <= 100000000L) stats.weeklyLimit = lim;
+  }
 
-  Serial.printf("[WiFi] Connected  IP: %s  RSSI: %d dBm\n",
-                WiFi.localIP().toString().c_str(), WiFi.RSSI());
-  playPattern(2);   // Connected chime
+  // ── Mark boot as successful ───────────────────
+  // Resetting s_bootFails here means safe-mode only triggers after 3
+  // reboots that ALL fail to reach this point.
+  s_bootFails = 0;
+
+  playPattern(2);
 
   // ── mDNS ─────────────────────────────────────
   if (MDNS.begin(MDNS_NAME)) {
@@ -1153,16 +1270,16 @@ void setup() {
   Serial.println(F("[NTP]  Syncing..."));
 
   // ── HTTP server ───────────────────────────────
-  httpServer.on("/",            HTTP_GET,              handleRoot);
-  httpServer.on("/api/status",  HTTP_GET,              handleApiStatus);
-  httpServer.on("/api/update",  HTTP_POST,             handleApiUpdate);
-  httpServer.on("/api/update",  HTTP_OPTIONS,          handleApiUpdate);
-  httpServer.on("/api/config",  HTTP_POST,             handleApiConfig);
+  httpServer.on("/",            HTTP_GET,     handleRoot);
+  httpServer.on("/api/status",  HTTP_GET,     handleApiStatus);
+  httpServer.on("/api/update",  HTTP_POST,    handleApiUpdate);
+  httpServer.on("/api/update",  HTTP_OPTIONS, handleApiUpdate);
+  httpServer.on("/api/config",  HTTP_POST,    handleApiConfig);
   httpServer.onNotFound(handleNotFound);
   httpServer.begin();
   Serial.println(F("[HTTP] Server started on port 80"));
-  Serial.printf("[READY] %s  →  http://%s.local  /  http://%s\n",
-               cfgDevName, MDNS_NAME, WiFi.localIP().toString().c_str());
+  Serial.printf("[READY] %s  ->  http://%s.local  /  http://%s\n",
+                cfgDevName, MDNS_NAME, WiFi.localIP().toString().c_str());
 }
 
 // ════════════════════════════════════════════════
